@@ -1,0 +1,14 @@
+# Demo del servidor SRE de AGENTES (/metrics y /healthz)
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY agentes ./agentes
+
+# Se instala el paquete como cualquier usuario lo haría y se ejecuta sin privilegios.
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 agentes
+
+USER agentes
+EXPOSE 9100
+CMD ["agentes", "serve", "--host", "0.0.0.0", "--port", "9100"]

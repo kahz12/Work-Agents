@@ -1,0 +1,80 @@
+# Bytecode y caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Entornos y empaquetado
+venv/
+venv313/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Secretos y credenciales locales: nunca se versionan.
+# Las plantillas sin valores reales (.env.example) sí se pueden subir.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Cobertura y herramientas de test
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Reportes del pipeline
+reports/
+AGENTES_WORKDIR/
+
+# ---------------------------------------------------------------
+# Artefactos que generan los demos al ejecutarse (`demo <agente>`).
+# Las entradas reales son solo */fixtures/*.py, que sí se versionan.
+# ---------------------------------------------------------------
+agentes/quality/.eslintrc.json
+agentes/quality/.flake8
+agentes/quality/pyproject.toml
+agentes/quality/requirements_sample.txt
+agentes/quality/results.sarif
+agentes/quality/sample_code.py
+
+agentes/devops/.github/
+agentes/devops/.gitlab-ci.yml
+agentes/devops/docker-compose.yml
+agentes/devops/my-helm-chart/
+
+agentes/docs/API_DOCUMENTATION.md
+agentes/docs/openapi.json
+agentes/docs/openapi.yaml
+agentes/docs/sample_api.py
+agentes/docs/swagger_ui.html
+
+agentes/hardening/Dockerfile.hardened
+agentes/hardening/mi_aplicacion.service
+
+agentes/qa/qa_adversarial_report.md
+agentes/qa/qa_report.html
+agentes/qa/qa_report.md
+agentes/qa/sample_app.py
+agentes/qa/test_sample_app.py
+agentes/qa/test_sample_app_pytest.py
+
+agentes/refactor/sample_monolith.py
+
+agentes/sre/sample_app.log

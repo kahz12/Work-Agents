@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentes-devsecops"
+dynamic = ["version"]
+description = "Ecosistema modular de agentes DevSecOps, SRE y QA"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "kahz12"}]
+requires-python = ">=3.9"
+dependencies = [
+  "PyYAML>=6.0",
+  "packaging>=21.0",
+  "tomli>=1.1; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+crypto = ["argon2-cffi>=23.0", "bcrypt>=4.0"]
+sast = ["bandit>=1.7"]
+dev = ["pytest>=7.0", "ruff>=0.4", "pyflakes>=3.0", "coverage>=7.0"]
+all = ["argon2-cffi>=23.0", "bcrypt>=4.0", "bandit>=1.7", "pytest>=7.0", "ruff>=0.4", "pyflakes>=3.0", "coverage>=7.0"]
+
+[project.scripts]
+agentes = "agentes.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "agentes.__version__"}
+
+[tool.setuptools]
+# Lista explícita: un test comprueba que cada agente va en el wheel y que no se instala
+# ningún paquete de nivel superior aparte de "agentes".
+packages = [
+  "agentes",
+  "agentes.cli",
+  "agentes.common",
+  "agentes.defensive",
+  "agentes.quality",
+  "agentes.hardening",
+  "agentes.refactor",
+  "agentes.qa",
+  "agentes.qa.fixtures",
+  "agentes.sre",
+  "agentes.devops",
+  "agentes.docs",
+  "agentes.docs.fixtures",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+# Excluir caches de herramientas, artefactos generados por las demostraciones y muestras intencionalmente vulnerables.
+exclude = [
+  "reports", ".venv", "venv", "venv313", "__pycache__", "build", "dist",
+  "agentes/devops/my-helm-chart", "agentes/qa/sample_app.py", "agentes/qa/test_sample_app.py",
+  "agentes/qa/test_sample_app_pytest.py",
+  "agentes/docs/sample_api.py", "agentes/quality/sample_code.py",
+  "agentes/refactor/sample_monolith.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"agentes_cli.py" = ["E402"]
+
+[tool.mypy]
+# Comprobación de tipos del paquete. Los extras opcionales (argon2, bcrypt, bandit) no traen
+# tipos o pueden no estar instalados.
+files = ["agentes"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# El CI suma la cobertura de pytest y de test_all_agents.py (que ejecuta las demos de cada
+# agente) y falla por debajo del mínimo. Se sube a mano cuando la cobertura mejora.
+[tool.coverage.run]
+source = ["agentes"]
+# Los fixtures son el código de ejemplo que analizan las demos: nunca se ejecutan.
+omit = ["agentes/*/fixtures/*"]
+
+[tool.coverage.report]
+fail_under = 95
+skip_covered = true
+show_missing = true

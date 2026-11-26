@@ -1,0 +1,15 @@
+# Demo del ecosistema AGENTES (SRE /metrics + /healthz)
+services:
+  agentes-sre:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    ports:
+      - "9100:9100"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.50

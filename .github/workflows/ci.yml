@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Ruff y mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Versión fija: con el estilo bloqueante, una versión nueva que estabilice reglas
+      # podría romper el CI sin que cambie el código. Se actualiza a mano.
+      - run: pip install ruff==0.17.5
+      # Este job corre sobre un checkout limpio, antes de que ninguna demo
+      # genere artefactos, así que ruff solo ve fuente versionada.
+      # El formato (`ruff format`) no se comprueba: el código no sigue ese estilo.
+      - name: Errores, estilo y orden de imports (E, F, W, I)
+        run: ruff check .
+      # También con versión fija: una versión nueva de mypy puede añadir errores sin que cambie el
+      # código. Con el extra crypto, para que argon2 y bcrypt tengan sus tipos reales.
+      - run: pip install -e ".[crypto]" mypy==2.4.1 types-PyYAML==6.0.12.20261113
+      - name: Tipos (mypy, configuración en pyproject.toml)
+        run: mypy
+
+  test:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[all]"
+      - name: Suite pytest
+        run: coverage run -m pytest -q
+      - name: Verificación exhaustiva de los 8 agentes
+        run: coverage run --append test_all_agents.py
+      # Suma de las dos ejecuciones; el mínimo está en [tool.coverage.report] de pyproject.toml.
+      - name: Cobertura
+        run: coverage report
+
+  self-audit:
+    name: Auditoría del propio repo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      # La herramienta se aplica a su propio código. Los hallazgos intencionados (el corpus
+      # de secretos falsos de los tests, las demos vulnerables a propósito) están revisados en
+      # .agentes-baseline.json: el trabajo falla solo con hallazgos nuevos. Se usa el motor
+      # AST porque es con el que se generó la línea base.
+      - name: agentes pipeline sobre el repo
+        run: agentes pipeline . -o reports --no-bandit --baseline .agentes-baseline.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: self-audit
+          path: reports/
+
+  wheel:
+    name: Wheel instalable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build --wheel
+      # Instala fuera del checkout: si al wheel le faltan paquetes, esto lo caza.
+      - name: Instalar el wheel en un venv limpio
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+      - name: El CLI instalado debe funcionar sin el checkout
+        run: |
+          mkdir -p /tmp/probe && cd /tmp/probe
+          printf 'def ok():\n    return 1\n' > s.py
+          export AGENTES_WORKDIR=/tmp/probe/out
+          /tmp/venv/bin/agentes --version
+          /tmp/venv/bin/agentes list
+          /tmp/venv/bin/agentes analyze s.py -o /tmp/probe/rep
+          /tmp/venv/bin/agentes generate compose -o /tmp/probe/dc.yml
+          /tmp/venv/bin/agentes generate helm -o /tmp/probe/chart
+          /tmp/venv/bin/agentes generate nginx -o /tmp/probe/nginx.conf
+          /tmp/venv/bin/agentes generate openapi -o /tmp/probe/oa.json --source s.py
+          /tmp/venv/bin/agentes generate tests -o /tmp/probe/test_s.py --source s.py
+          /tmp/venv/bin/agentes pipeline /tmp/probe -o /tmp/probe/p --no-fail --offline
+          /tmp/venv/bin/agentes generate tests -o /tmp/probe/test_rec.py --source s.py --record
+          /tmp/venv/bin/agentes secrets /tmp/probe
+          /tmp/venv/bin/agentes doctor
+          for a in defensive quality hardening refactor qa sre devops docs; do
+            /tmp/venv/bin/agentes demo "$a" > /dev/null
+          done
+      - name: El demo no debe escribir dentro de la instalación
+        run: |
+          test -z "$(find /tmp/venv/lib -name 'qa_report.html' -o -name 'openapi.json' -o -name 'results.sarif')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl

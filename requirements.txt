@@ -1,0 +1,10 @@
+# Dependencias base del ecosistema AGENTES
+PyYAML>=6.0
+packaging>=21.0
+tomli>=1.1; python_version < '3.11'
+
+# Opcionales:
+# pip install -e ".[crypto]"   # argon2-cffi, bcrypt
+# pip install -e ".[sast]"     # bandit
+# pip install -e ".[dev]"      # pytest, ruff
+# pip install -e ".[all]"

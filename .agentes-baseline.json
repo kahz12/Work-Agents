@@ -1,0 +1,273 @@
+{
+  "schema": "agentes.baseline.v1",
+  "generated_by": "agentes 3.0.0",
+  "note": "Hallazgos revisados y aceptados. Regenera con: agentes pipeline . --write-baseline <archivo>",
+  "entries": [
+    {
+      "fingerprint": "d2247ac6d95602326594",
+      "rule_id": "SAST-ALTO",
+      "file": "agentes/defensive/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto hardcodeado en 'password'."
+    },
+    {
+      "fingerprint": "4e8b690f3c718e6ea7c8",
+      "rule_id": "SAST-ALTO",
+      "file": "agentes/defensive/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto hardcodeado en 'secret'."
+    },
+    {
+      "fingerprint": "ec221d0fdf01b7f9993a",
+      "rule_id": "SECRET",
+      "file": "agentes/defensive/main.py",
+      "level": "ALTO",
+      "message": "Credencial dentro de una URL de conexion: \"DATABASE_URL\": \"postgresql://root:***REDACTED***@localhost/..."
+    },
+    {
+      "fingerprint": "cae2334165762ab95468",
+      "rule_id": "SECRET",
+      "file": "agentes/defensive/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto incrustado: password = \"Pas***REDACTED***\""
+    },
+    {
+      "fingerprint": "abfcb813941e22aa8659",
+      "rule_id": "SECRET",
+      "file": "agentes/defensive/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto incrustado: secret = \"mi_***REDACTED***\""
+    },
+    {
+      "fingerprint": "ef4279d857e80d97ef51",
+      "rule_id": "SAST-ALTO",
+      "file": "agentes/sre/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto hardcodeado en la clave 'password'."
+    },
+    {
+      "fingerprint": "83ad74f9f1c2808993eb",
+      "rule_id": "SECRET",
+      "file": "agentes/sre/main.py",
+      "level": "ALTO",
+      "message": "Posible secreto incrustado: print(logger.warning(\"Credenciales sensibles enmascaradas\", ..."
+    },
+    {
+      "fingerprint": "574399234dd2e1d1ee27",
+      "rule_id": "SAST-CRITICO",
+      "file": "test_all_agents.py",
+      "level": "CRITICO",
+      "message": "Ejecución insegura de comandos con 'os.popen()' (riesgo de Command Injection)."
+    },
+    {
+      "fingerprint": "457582d864d42f2451b8",
+      "rule_id": "SAST-CRITICO",
+      "file": "test_all_agents.py",
+      "level": "CRITICO",
+      "message": "Ejecución insegura de comandos con 'os.system()' (riesgo de Command Injection)."
+    },
+    {
+      "fingerprint": "457582d864d42f2451b8",
+      "rule_id": "SAST-CRITICO",
+      "file": "test_all_agents.py",
+      "level": "CRITICO",
+      "message": "Ejecución insegura de comandos con 'os.system()' (riesgo de Command Injection)."
+    },
+    {
+      "fingerprint": "457582d864d42f2451b8",
+      "rule_id": "SAST-CRITICO",
+      "file": "test_all_agents.py",
+      "level": "CRITICO",
+      "message": "Ejecución insegura de comandos con 'os.system()' (riesgo de Command Injection)."
+    },
+    {
+      "fingerprint": "457582d864d42f2451b8",
+      "rule_id": "SAST-CRITICO",
+      "file": "test_all_agents.py",
+      "level": "CRITICO",
+      "message": "Ejecución insegura de comandos con 'os.system()' (riesgo de Command Injection)."
+    },
+    {
+      "fingerprint": "d3519deb61f6e80eedea",
+      "rule_id": "SECRET",
+      "file": "tests/test_baseline.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: SECRETO = 'TOKEN = \"ghp***REDACTED***\"\\n'"
+    },
+    {
+      "fingerprint": "73673193d7c0d9e2b2ef",
+      "rule_id": "SECRET",
+      "file": "tests/test_cli.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: FAKE_TOKEN = \"ghp***REDACTED***\""
+    },
+    {
+      "fingerprint": "424de358f6365151baa2",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de API de Anthropic: (\"anthropic\", 'A = \"sk-***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "61ec034f11f3c5789bde",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de API de Google: (\"google api\", 'G = \"AIz***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "58dfdb1c37c70ad3bf53",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de API de OpenAI: (\"openai\", 'O = \"sk-***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "1fdbf8bb7a8eae4c1881",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de API de SendGrid: (\"sendgrid\", 'S = \"SG.***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "857c8f8dd0005ecf9b97",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de API de Stripe: (\"stripe\", 'S = \"sk_***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "8efa67fe94b8cd16c8c8",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de acceso AWS (AKIA): (\"aws access key id\", 'AWS_KEY = \"AKI***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "7b230c9de70347d12abd",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave de acceso temporal AWS (ASIA): (\"aws temp key\", 'k = \"ASI***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "16c4a6a86deee0f544e5",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave privada incrustada (PEM): (\"clave privada PEM\", \"-----BEGIN RSA PRIVATE KEY-----\"),"
+    },
+    {
+      "fingerprint": "6ff7a019b3cad66939a4",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave privada incrustada (PEM): (\"clave privada ssh\", \"-----BEGIN OPENSSH PRIVATE KEY-----\")..."
+    },
+    {
+      "fingerprint": "25c2b047b998296b6935",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Clave secreta de AWS: (\"aws secret key\", 'aws***REDACTED***'),"
+    },
+    {
+      "fingerprint": "c2351b8e951c21df3a25",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Credencial dentro de una URL de conexion: (\"mongodb con clave\", 'DB = \"mongodb+srv://admin:***REDACTED..."
+    },
+    {
+      "fingerprint": "51429f427a6128a41b3d",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Credencial dentro de una URL de conexion: (\"postgres con clave\", 'DB = \"postgresql://usuario:***REDACT..."
+    },
+    {
+      "fingerprint": "d3bec6b6d5e05da3ab46",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Credencial en cabecera Authorization: (\"basic auth\", 'headers = {\"Aut***REDACTED***\"}'),"
+    },
+    {
+      "fingerprint": "78d3bd0a77b6a5de7ff8",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "JSON Web Token (JWT): (\"jwt\", 'j = \"eyJ***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "7b84201cfc0974aea26b",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub (fine-grained): (\"github fine-grained\", 'tok = \"git***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "628a0535aa1d1ae13d03",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: (\"github pat\", 'tok = \"ghp***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "a21b7bacc477dec290fc",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: (\"token en dict\", 'cfg = {\"token\": \"ghp***REDACTED***\"}'),"
+    },
+    {
+      "fingerprint": "b2a225326d46794d5b3d",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: (mypy_c / \"cached.json\").write_text('{\"token\": \"ghp***REDACT..."
+    },
+    {
+      "fingerprint": "0dadee40cda621ab7733",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: (tmp_path / \".env\").write_text('GITHUB_TOKEN=\"ghp***REDACTED..."
+    },
+    {
+      "fingerprint": "42bd233ab507af49377c",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: (v313 / \"leak.py\").write_text('API_KEY = \"ghp***REDACTED***\"..."
+    },
+    {
+      "fingerprint": "5e7cd70084942f2b935e",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de GitHub: secret_val = \"ghp***REDACTED***\""
+    },
+    {
+      "fingerprint": "007c03d9cb147d1683ed",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de Slack: (\"slack bot\", 'S = \"xox***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "2786b7b4fcc8c12fec33",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Token de npm: (\"npm\", 'N = \"npm***REDACTED***\"'),"
+    },
+    {
+      "fingerprint": "d0959e9c5782e5bb288a",
+      "rule_id": "SECRET",
+      "file": "tests/test_core.py",
+      "level": "ALTO",
+      "message": "Webhook de Slack: (\"slack webhook\", 'u = \"https://hoo***REDACTED***\"'),"
+    }
+  ]
+}
