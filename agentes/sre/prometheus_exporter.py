@@ -7,7 +7,8 @@ from typing import Any, Callable, Dict, Optional
 
 class PrometheusExporter:
     """
-    Exportador de métricas Prometheus (texto) y servidor HTTP /metrics + /healthz.
+    Prometheus metrics in the text exposition format, plus an HTTP server for /metrics and
+    /healthz. Counters are class-level and guarded by a lock, so handler threads share them.
     """
 
     _lock = threading.Lock()
@@ -17,7 +18,7 @@ class PrometheusExporter:
 
     @classmethod
     def reset(cls) -> None:
-        """Reinicia los contadores y el tiempo de arranque."""
+        """Reset the counters and the start time."""
         with cls._lock:
             cls._start_time = time.time()
             cls._requests_total = 0
@@ -25,6 +26,7 @@ class PrometheusExporter:
 
     @classmethod
     def increment(cls, *, error: bool = False) -> None:
+        """Count one request, and one error when error=True."""
         with cls._lock:
             cls._requests_total += 1
             if error:
@@ -38,7 +40,8 @@ class PrometheusExporter:
         uptime_seconds: Optional[float] = None,
     ) -> str:
         """
-        Genera el bloque de métricas Prometheus para raspado (/metrics).
+        Text exposition block for a Prometheus scrape of /metrics. Values not passed in are
+        taken from the live counters.
         """
         if requests_total is None or errors_total is None or uptime_seconds is None:
             with cls._lock:
@@ -50,15 +53,15 @@ class PrometheusExporter:
                     uptime_seconds = time.time() - cls._start_time
 
         lines = [
-            "# HELP app_requests_total Número total de solicitudes HTTP procesadas.",
+            "# HELP app_requests_total Total number of HTTP requests handled.",
             "# TYPE app_requests_total counter",
             f"app_requests_total {requests_total}",
             "",
-            "# HELP app_requests_errors_total Número total de solicitudes fallidas (5xx / Excepciones).",
+            "# HELP app_requests_errors_total Total number of failed requests (5xx / exceptions).",
             "# TYPE app_requests_errors_total counter",
             f"app_requests_errors_total {errors_total}",
             "",
-            "# HELP app_uptime_seconds Tiempo de actividad continuo del servicio en segundos.",
+            "# HELP app_uptime_seconds Continuous service uptime in seconds.",
             "# TYPE app_uptime_seconds gauge",
             f"app_uptime_seconds {round(uptime_seconds, 2)}",
             ""
@@ -70,7 +73,10 @@ class PrometheusExporter:
         cls,
         health_fn: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> type:
-        """Construye el manejador HTTP para /metrics y /healthz."""
+        """
+        Request handler class for /metrics and /healthz. health_fn supplies the health payload;
+        /healthz answers 200 when its status is HEALTHY or OK and 503 otherwise.
+        """
         def _default_health() -> Dict[str, Any]:
             with cls._lock:
                 uptime = round(time.time() - cls._start_time, 2)
@@ -80,6 +86,7 @@ class PrometheusExporter:
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):
+                # Silence the default per-request stderr line; scrapes would flood the console.
                 return
 
             def _send_bytes(self, status_code: int, content_type: str, body: bytes) -> None:
@@ -118,14 +125,14 @@ class PrometheusExporter:
         health_fn: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> None:
         """
-        Sirve /metrics y /healthz hasta Ctrl+C.
+        Serve /metrics and /healthz until Ctrl+C.
         """
         handler = cls.build_handler(health_fn=health_fn)
         server = ThreadingHTTPServer((host, port), handler)
-        print(f"SRE endpoints en http://{host}:{port}/metrics y /healthz (Ctrl+C para salir)")
+        print(f"SRE endpoints at http://{host}:{port}/metrics and /healthz (Ctrl+C to stop)")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            print("\nDetenido.")
+            print("\nStopped.")
         finally:
             server.server_close()

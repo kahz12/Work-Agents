@@ -15,6 +15,7 @@ _TYPE_MAP = {
 
 
 def _ann_to_openapi(annotation: Optional[ast.AST]) -> Dict[str, Any]:
+    """OpenAPI schema for a type annotation. Unknown or missing annotations default to string."""
     if annotation is None:
         return {"type": "string"}
     if isinstance(annotation, ast.Name):
@@ -35,13 +36,19 @@ def _ann_to_openapi(annotation: Optional[ast.AST]) -> Dict[str, Any]:
 
 class OpenAPIGenerator:
     """
-    Generador automatizado de especificaciones OpenAPI 3.0.3 (Swagger)
-    mediante análisis AST. Incluye parámetros, requestBody y schemas básicos.
+    Builds OpenAPI 3.0.3 (Swagger) specifications from Python source through static AST
+    analysis; the code is never imported. Produces query parameters, request bodies and basic
+    component schemas from the functions' signatures and type hints.
     """
 
     @staticmethod
     def _build_operation(node: Union[ast.FunctionDef, ast.AsyncFunctionDef], fname: str, method: str) -> Dict[str, Any]:
-        doc = ast.get_docstring(node) or "Endpoint de servicio"
+        """
+        OpenAPI operation for one endpoint function. GET and DELETE arguments become query
+        parameters; for POST, PUT and PATCH they become JSON request-body properties.
+        Arguments without a default are required.
+        """
+        doc = ast.get_docstring(node) or "Service endpoint"
         args = [a for a in node.args.args if a.arg != "self"]
         defaults_offset = len(args) - len(node.args.defaults)
         required_body_props = []
@@ -68,7 +75,7 @@ class OpenAPIGenerator:
             "description": doc,
             "responses": {
                 "200": {
-                    "description": "Operación exitosa",
+                    "description": "Successful operation",
                     "content": {
                         "application/json": {
                             "schema": {"type": "object"}
@@ -95,7 +102,8 @@ class OpenAPIGenerator:
                     }
                 }
             }
-            # Exponer metadatos auxiliares para que el ensamblador OpenAPI registre el esquema en components.schemas.
+            # Temporary keys: _collect_from_file pops them, moves the schema into
+            # components.schemas and replaces the inline schema with a $ref.
             operation["_request_schema_name"] = schema_name
             operation["_request_schema"] = {
                 "type": "object",
@@ -108,17 +116,17 @@ class OpenAPIGenerator:
     @staticmethod
     def _decorator_route(node: ast.AST) -> Optional[Tuple[str, str]]:
         """
-        Detecta @app.route('/x', methods=['POST']) (Flask) y @app.get('/x') (FastAPI).
-        Retorna (path, method) o None.
+        Detect @app.route('/x', methods=['POST']) (Flask) and @app.get('/x') (FastAPI).
+        Returns (path, method) or None. With several methods, the first one listed is used.
         """
         for dec in getattr(node, "decorator_list", []):
-            # Decoradores abreviados estilo FastAPI o APIRouter (por ejemplo, @app.get("/users")).
+            # FastAPI / APIRouter shorthand decorators, e.g. @app.get("/users").
             if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
                 http_verb = dec.func.attr.lower()
                 if http_verb in ("get", "post", "put", "delete", "patch", "options", "head"):
                     if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
                         return dec.args[0].value, http_verb
-                # Decoradores clásicos de Flask con ruta posicional y lista explícita de verbos en methods=[...].
+                # Classic Flask decorators: positional path plus an optional methods=[...] list.
                 if http_verb == "route":
                     path = None
                     method = "get"
@@ -132,7 +140,7 @@ class OpenAPIGenerator:
                                     break
                     if path:
                         return path, method
-            # Ignorar decoradores sin invocación explícita (ast.Attribute/ast.Name sin argumentos de ruta).
+            # Bare decorators (no call, hence no path) cannot declare a route and are skipped.
         return None
 
     @staticmethod
@@ -143,9 +151,9 @@ class OpenAPIGenerator:
         errors: List[str],
         naming_convention: bool = True,
     ) -> None:
-        """Extrae rutas y schemas de un único archivo Python hacia los acumuladores."""
+        """Collect the routes and schemas of one Python file into the shared accumulators."""
         if not os.path.exists(source_filepath):
-            errors.append(f"El archivo '{source_filepath}' no existe.")
+            errors.append(f"File '{source_filepath}' does not exist.")
             return
 
         try:
@@ -153,10 +161,12 @@ class OpenAPIGenerator:
                 content = f.read()
             tree = ast.parse(content, filename=source_filepath)
         except (SyntaxError, UnicodeDecodeError, OSError) as exc:
-            # Propagar el diagnóstico en la colección errors en lugar de abortar el recorrido completo del pipeline.
-            errors.append(f"No se pudo analizar '{source_filepath}': {exc}")
+            # Record the problem and carry on: one unparsable module must not abort the whole run.
+            errors.append(f"Could not parse '{source_filepath}': {exc}")
             return
 
+        # Naming convention, used when naming_convention=True: the prefix gives the HTTP method
+        # and the rest of the name the path (post_create_user -> POST /create_user).
         method_prefixes = (
             ("delete_", "delete"),
             ("post_", "post"),
@@ -205,19 +215,20 @@ class OpenAPIGenerator:
     @staticmethod
     def generate_openapi_spec_from_files(
         filepaths: List[str],
-        title: str = "API Servicio",
+        title: str = "Service API",
         version: str = "1.0.0",
         *,
         naming_convention: bool = True,
     ) -> Dict[str, Any]:
         """
-        Analiza múltiples archivos Python y combina sus rutas y schemas en una
-        única especificación OpenAPI 3.0.3.
+        Analyse several Python files and merge their routes and schemas into a single
+        OpenAPI 3.0.3 specification.
 
-        Las rutas salen de los decoradores de Flask y FastAPI. Con naming_convention=True
-        (el valor por defecto de la API, por compatibilidad) también de las funciones
-        get_/post_/put_/delete_, algo que en un proyecto que no es web inventa rutas.
-        Si no hay ninguna ruta, paths queda vacío: no se inventa un /health.
+        Routes come from Flask and FastAPI decorators. With naming_convention=True (the
+        library default, kept so existing callers behave the same) they also come from
+        get_/post_/put_/delete_ functions, which invents routes in a project that is not a
+        web service; the CLI and the pipeline therefore pass False. When no route is found,
+        paths stays empty rather than inventing a /health endpoint.
         """
         paths: Dict[str, Any] = {}
         components_schemas: Dict[str, Any] = {}
@@ -231,30 +242,30 @@ class OpenAPIGenerator:
             "info": {
                 "title": title,
                 "version": version,
-                "description": "Especificación de API generada automáticamente por el Agente de Documentación."
+                "description": "API specification generated automatically by the agentes docs agent."
             },
             "paths": paths,
         }
         if components_schemas:
             spec["components"] = {"schemas": components_schemas}
         if errors:
-            # Los archivos que no se pudieron analizar van en una extensión de proveedor (x-),
-            # válida en OpenAPI 3.x, para que el diagnóstico viaje dentro del contrato
-            # generado y no se descarte silenciosamente si un modulo no pudo parsearse.
+            # Files that could not be parsed are listed under a vendor extension (x-...), which
+            # OpenAPI 3.x allows, so the diagnostic travels with the generated contract instead
+            # of being silently dropped.
             spec["x-agentes-errors"] = errors
         return spec
 
     @staticmethod
     def generate_openapi_spec(
         source_filepath: str,
-        title: str = "API Servicio",
+        title: str = "Service API",
         version: str = "1.0.0",
         *,
         naming_convention: bool = True,
     ) -> Dict[str, Any]:
         """
-        Analiza un archivo Python y genera una especificación OpenAPI 3.0.3 válida.
-        Soporta decoradores Flask/FastAPI y, con naming_convention, la convención get_/post_.
+        Build an OpenAPI 3.0.3 specification from a single Python file. Supports Flask and
+        FastAPI decorators and, with naming_convention, the get_/post_ naming convention.
         """
         return OpenAPIGenerator.generate_openapi_spec_from_files(
             [source_filepath], title=title, version=version, naming_convention=naming_convention,
@@ -267,7 +278,7 @@ class OpenAPIGenerator:
 
     @staticmethod
     def detect_web_frameworks(filepaths: List[str]) -> List[str]:
-        """Frameworks web importados en los archivos. Sin ninguno, no tiene sentido generar OpenAPI."""
+        """Web frameworks imported by the files. With none, generating OpenAPI makes no sense."""
         found = set()
         for fp in filepaths:
             try:
@@ -290,7 +301,7 @@ class OpenAPIGenerator:
     @staticmethod
     def export_spec_to_json(spec: Dict[str, Any], output_filepath: str) -> str:
         """
-        Guarda la especificación OpenAPI en un archivo JSON.
+        Write the specification as indented JSON and return the path.
         """
         os.makedirs(os.path.dirname(os.path.abspath(output_filepath)), exist_ok=True)
         with open(output_filepath, "w", encoding="utf-8") as f:
@@ -300,7 +311,10 @@ class OpenAPIGenerator:
     @staticmethod
     def export_spec_to_yaml(spec: Dict[str, Any], output_filepath: str) -> str:
         """
-        Guarda la especificación OpenAPI en formato YAML nativo.
+        Write the specification as YAML and return the path.
+
+        Uses a small built-in serialiser so the docs agent does not need PyYAML at runtime.
+        Scalars are emitted through json.dumps, which always produces valid YAML flow scalars.
         """
         def dict_to_yaml(data, indent=0):
             lines = []
@@ -321,7 +335,7 @@ class OpenAPIGenerator:
                         lines.append(f"{prefix}- {json.dumps(item)}")
             return "\n".join(lines)
 
-        yaml_content = "# Especificación OpenAPI 3.0.3 generada por agentes (agente docs).\n" + dict_to_yaml(spec)
+        yaml_content = "# OpenAPI 3.0.3 specification generated by agentes (docs agent).\n" + dict_to_yaml(spec)
         os.makedirs(os.path.dirname(os.path.abspath(output_filepath)), exist_ok=True)
         with open(output_filepath, "w", encoding="utf-8") as f:
             f.write(yaml_content)

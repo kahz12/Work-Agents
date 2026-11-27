@@ -1,20 +1,21 @@
-# Agente de Calidad de Código y SAST
+# Code Quality and SAST Agent
 
-SAST (Bandit + AST), SARIF, linters y auto-fixer de dependencias.
+Static analysis (Bandit + AST), SARIF export, linter configuration and a dependency auto-fixer.
 
-## Estructura
+## Layout
 
-- `static_checker.py` — Bandit real o AST: eval/exec/pickle/shell, **secretos hardcodeados**, SQL f-string/concat, assert, Jinja. SARIF 2.1.0.
-- `dependency_auditor.py` — Audit + auto-fix unpinned/`>=`/`~=` (mapa o PyPI).
-- `linter_config.py` — `.flake8`, `pyproject.toml`, ESLint.
+- `static_checker.py` — Runs Bandit when installed plus the built-in AST engine: eval/exec, pickle, shell commands, **hardcoded secrets**, SQL built with f-strings or concatenation, assert, Jinja and more. Exports SARIF 2.1.0.
+- `dependency_auditor.py` — Audits requirements.txt and package.json, and pins unpinned, `>=` and `~=` dependencies to the newest matching PyPI release.
+- `package_index.py` — PyPI version lookup (stable, non-yanked, installable on the running Python).
+- `vulnerabilities.py` — Known-vulnerability lookup in OSV for manifests, lock files and installed environments.
+- `linter_config.py` — `.flake8`, `pyproject.toml` and ESLint configuration.
 - `main.py` — Demo.
 
-## Uso
+## Usage
 
 ```bash
-agentes demo quality               # demo con datos de ejemplo
-python -m agentes.quality.main     # lo mismo, sin pasar por el CLI
+agentes demo quality               # demo on sample data
+python -m agentes.quality.main     # the same, without going through the CLI
 agentes analyze ./src -o ./reports
 agentes fix requirements.txt --dry-run
 ```
-

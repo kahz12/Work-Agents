@@ -1,5 +1,5 @@
 """
-Inspección AST de módulos Python: firmas, excepciones, llamadas y efectos E/S.
+AST inspection of Python modules: signatures, raised exceptions, calls and I/O side effects.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _NON_DET_CALLS = NON_DET_CALLS
 
 
 def read_and_parse(source_filepath: str) -> ast.Module:
-    """Lee un archivo fuente Python y devuelve su árbol AST."""
+    """Read a Python source file and return its AST."""
     with open(source_filepath, "r", encoding="utf-8") as f:
         content = f.read()
     return ast.parse(content, filename=source_filepath)
@@ -43,7 +43,7 @@ def _attr_chain(node: ast.AST) -> str:
 
 
 def _parameter_names(args: ast.arguments) -> Set[str]:
-    """Parámetros posicionales, solo con nombre, *args y **kwargs de una función."""
+    """Names of a function's positional, keyword-only, *args and **kwargs parameters."""
     names = {a.arg for a in args.args} | {a.arg for a in args.kwonlyargs}
     if args.vararg:
         names.add(args.vararg.arg)
@@ -54,9 +54,9 @@ def _parameter_names(args: ast.arguments) -> Set[str]:
 
 def _extract_raise_info(node: ast.Raise) -> Optional[Tuple[str, Optional[str]]]:
     """
-    (excepción, mensaje) de un raise. El mensaje es el literal si lo hay, "" si se lanza sin
-    argumentos (raise KeyError() o raise KeyError, cuyo mensaje es vacío) y None si se calcula
-    en ejecución y no se puede saber.
+    (exception, message) of a raise statement. The message is the literal when there is one, ""
+    when the exception is raised without arguments (raise KeyError() or raise KeyError, whose
+    message is empty), and None when it is computed at runtime and cannot be known statically.
     """
     if node.exc is None:
         return None
@@ -84,7 +84,7 @@ FuncNode = Union[ast.FunctionDef, ast.AsyncFunctionDef]
 
 
 def body_nodes(func: FuncNode):
-    """Nodos del cuerpo de una función, sin entrar en funciones, lambdas ni clases definidas dentro."""
+    """Nodes of a function body, without entering functions, lambdas or classes defined inside it."""
     pending: List[ast.AST] = list(func.body)
     while pending:
         node = pending.pop()
@@ -98,7 +98,7 @@ def _name_of(node: ast.AST) -> Optional[str]:
 
 
 def decorator_names(node: FuncNode) -> Set[str]:
-    """Nombres de los decoradores sin módulo ni llamada: @functools.cached_property -> cached_property."""
+    """Decorator names without module or call: @functools.cached_property -> cached_property."""
     names = set()
     for dec in node.decorator_list:
         chain = _attr_chain(dec.func if isinstance(dec, ast.Call) else dec)
@@ -109,8 +109,8 @@ def decorator_names(node: FuncNode) -> Set[str]:
 
 def method_kind(node: FuncNode) -> str:
     """
-    method, static, class, property (también cached_property), setter (setter o deleter de una
-    propiedad, que comparte nombre con el getter), abstract u overload (firma sin cuerpo real).
+    method, static, class, property (cached_property included), setter (a property's setter or
+    deleter, which shares the getter's name), abstract or overload (a signature with no real body).
     """
     decorators = decorator_names(node)
     if "overload" in decorators:
@@ -128,9 +128,9 @@ def method_kind(node: FuncNode) -> str:
     return "method"
 
 
-# --- Entrada None -----------------------------------------------------------------------
+# --- None as input ----------------------------------------------------------------------
 
-# Llamadas a builtins que fallan con None como primer argumento (str(), repr() o bool() no).
+# Builtins that fail when given None as their first argument (str(), repr() and bool() do not).
 _NONE_FAILING_BUILTINS = frozenset({"len", "iter", "sorted", "sum", "min", "max", "list", "tuple", "set",
                                     "frozenset", "enumerate", "zip", "reversed", "any", "all", "int", "float"})
 _CATCHES_TYPE_ERRORS = frozenset({"Exception", "BaseException", "TypeError", "AttributeError"})
@@ -148,7 +148,7 @@ def _catches_type_errors(node: ast.Try) -> bool:
 
 
 def _guarded_names(func: FuncNode) -> Set[str]:
-    """Parámetros que el cuerpo comprueba contra None, por su tipo o por su verdad."""
+    """Parameters the body checks against None, by type or by truthiness."""
     guarded: Set[str] = set()
     for node in body_nodes(func):
         if isinstance(node, ast.Compare):
@@ -171,13 +171,13 @@ def _guarded_names(func: FuncNode) -> Set[str]:
 
 
 def _param_in(node: ast.AST, names: Set[str]) -> Optional[str]:
-    """El nombre del parámetro si node es uno de names; None en otro caso."""
+    """The parameter name when node is one of names; None otherwise."""
     name = _name_of(node)
     return name if name in names else None
 
 
 def _unsafe_compared(node: ast.Compare, names: Set[str]) -> List[Optional[str]]:
-    """Parámetros que una comparación usa con None: los dos lados de <, >..., y el contenedor de in."""
+    """Parameters a comparison would use with None: both sides of <, >... and the container of in."""
     found: List[Optional[str]] = []
     operands = [node.left, *node.comparators]
     for op, left, right in zip(node.ops, operands, operands[1:]):
@@ -189,7 +189,7 @@ def _unsafe_compared(node: ast.Compare, names: Set[str]) -> List[Optional[str]]:
 
 
 def _unsafe_in(expr: ast.AST, names: Set[str]) -> Set[str]:
-    """Parámetros que expr usa en una operación que falla con None."""
+    """Parameters that expr uses in an operation that fails on None."""
     found: List[Optional[str]] = []
     for node in ast.walk(expr):
         if isinstance(node, ast.BinOp) and not isinstance(node.op, ast.Mod):
@@ -210,16 +210,16 @@ def _may_exit(stmt: ast.stmt) -> bool:
                for n in ast.walk(stmt))
 
 
-# Sentencias sin ramas: lo que llaman se ejecuta siempre que se llega a ellas.
+# Branch-free statements: whatever they call runs whenever execution reaches them.
 _SIMPLE_STATEMENTS = (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Return, ast.Raise, ast.Assert,
                       ast.Delete)
-# Lo que puede no ejecutarse aunque se llegue a la sentencia que lo contiene.
+# Expressions that may not run even when the statement containing them is reached.
 _DEFERRED = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.FunctionDef,
              ast.AsyncFunctionDef, ast.ClassDef, ast.IfExp, ast.BoolOp)
 
 
 def _calls_in(node: ast.AST) -> List[ast.Call]:
-    """Las llamadas de una expresión que se hacen seguro al evaluarla (no las de un and, un if o una lambda)."""
+    """Calls in an expression that certainly run when it is evaluated (not those behind and/or, a conditional or a lambda)."""
     found: List[ast.Call] = []
     pending = [node]
     while pending:
@@ -233,17 +233,17 @@ def _calls_in(node: ast.AST) -> List[ast.Call]:
 
 
 def _is_guard(stmt: ast.stmt) -> bool:
-    """Un if sin else que termina lanzando: una validación que un valor de ejemplo válido no dispara."""
+    """An if without else that ends by raising: a validation that a valid sample value does not trigger."""
     return isinstance(stmt, ast.If) and not stmt.orelse and isinstance(stmt.body[-1], ast.Raise)
 
 
 def always_reached_calls(func: FuncNode) -> List[ast.Call]:
     """
-    Las llamadas que hace la función en cualquier ejecución que acepte su entrada: las de las
-    sentencias de su cuerpo, en orden, hasta la primera que puede terminarla o saltarse el resto
-    (un return, un if con return, un bucle con break...). Una validación (if sin else que termina
-    en raise) no corta, porque un valor de ejemplo válido no la dispara; dentro de un with o del
-    cuerpo de un try se sigue igual.
+    The calls the function makes in every execution that accepts its input: those of its body's
+    statements, in order, up to the first one that can end the function or skip the rest (a
+    return, an if containing a return, a loop with break...). A validation (an if without else
+    that ends in raise) does not stop the walk, because a valid sample value does not trigger it;
+    the walk carries on into with blocks and try bodies.
     """
     calls: List[ast.Call] = []
 
@@ -264,7 +264,7 @@ def always_reached_calls(func: FuncNode) -> List[ast.Call]:
                 if _may_exit(stmt):
                     return False
             else:
-                # if, bucles, match: solo se evalúa seguro su condición o lo que recorren.
+                # if, loops, match: only the condition or the iterable is certain to be evaluated.
                 head = getattr(stmt, "test", None) or getattr(stmt, "iter", None) or getattr(stmt, "subject", None)
                 calls.extend(_calls_in(head) if head is not None else [])
                 if _may_exit(stmt):
@@ -276,7 +276,7 @@ def always_reached_calls(func: FuncNode) -> List[ast.Call]:
 
 
 def _is_forever(loop: ast.While) -> bool:
-    """while True (o while 1) sin break propio, return, raise ni sys.exit: solo lo para una excepción de fuera."""
+    """while True (or while 1) with no break, return, raise or sys.exit of its own: only an outside exception stops it."""
     if not (isinstance(loop.test, ast.Constant) and loop.test.value in (True, 1)):
         return False
     pending: List[Tuple[ast.AST, bool]] = [(stmt, False) for stmt in loop.body]
@@ -295,9 +295,9 @@ def _is_forever(loop: ast.While) -> bool:
 
 def has_endless_loop(func: FuncNode) -> bool:
     """
-    La función entra siempre en un bucle sin fin (un monitor, un servidor): un while True sin
-    salida en una sentencia que se ejecuta en cualquier llamada, también dentro de un with o de un
-    try. Un generador no cuenta, porque llamarlo no ejecuta nada.
+    True when the function always enters an endless loop (a monitor, a server): a while True with
+    no way out, in a statement that runs on every call, including inside a with or a try. A
+    generator does not count, because calling it executes nothing.
     """
     if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in body_nodes(func)):
         return False
@@ -315,17 +315,17 @@ def has_endless_loop(func: FuncNode) -> bool:
     return scan(func.body)
 
 
-# Nombres de parámetro que son una duración: un valor límite enorme dejaría el test esperando.
+# Parameter names that denote a duration: a huge boundary value would leave the test waiting.
 _DURATION_NAME = re.compile(r"^(seconds|secs|delay|timeout|interval|wait|duration|sleep)(_|$)"
                             r"|_(seconds|secs|minutes|hours|ms|timeout|delay|interval)$")
-# Llamadas que esperan el tiempo que reciben (join no: también es str.join).
+# Calls that wait for the time they are given (not join: that is also str.join).
 _WAITING_CALL = re.compile(r"(^|\.)(sleep|wait|wait_for)$")
 
 
 def duration_params(func: FuncNode) -> Set[str]:
     """
-    Parámetros que son una duración: por su nombre, o porque la función los pasa (también dentro
-    de una operación, como minutos * 60) a sleep o wait, o como timeout=.
+    Parameters that are a duration: by name, or because the function passes them (possibly inside
+    an expression such as minutes * 60) to sleep or wait, or as timeout=.
     """
     names = {a.arg for a in [*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs]}
     found = {n for n in names if _DURATION_NAME.search(n.lower())}
@@ -342,14 +342,14 @@ def duration_params(func: FuncNode) -> Set[str]:
 
 def none_unsafe_params(func: FuncNode) -> Set[str]:
     """
-    Parámetros con los que None hace fallar seguro a la función: se usan en una operación que no
-    admite None (aritmética, índice, atributo, iteración, len, comparación de orden...) en una
-    sentencia que siempre se ejecuta, y el cuerpo no los comprueba en ningún sitio. El cuerpo se
-    recorre en orden y se para en la primera sentencia que puede terminar la función o saltarse
-    el resto: a partir de ahí, que se llegue a una operación depende de los demás argumentos.
+    Parameters for which None certainly makes the function fail: they are used in an operation
+    that rejects None (arithmetic, indexing, attribute access, iteration, len, ordering
+    comparison...) in a statement that always runs, and the body never checks them. The body is
+    walked in order and the walk stops at the first statement that can end the function or skip
+    the rest: past that point, whether an operation is reached depends on the other arguments.
     """
     if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in body_nodes(func)):
-        return set()  # un generador no ejecuta nada hasta que se itera
+        return set()  # a generator runs nothing until it is iterated
     names = {a.arg for a in [*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs]}
     unsafe: Set[str] = set()
     for stmt in func.body:
@@ -375,7 +375,7 @@ def none_unsafe_params(func: FuncNode) -> Set[str]:
 
 
 def is_cli_entrypoint(func: FuncNode) -> bool:
-    """La función lee sys.argv o termina el proceso (sys.exit, SystemExit): se prueba por su línea de órdenes."""
+    """The function reads sys.argv or ends the process (sys.exit, SystemExit): it is tested through its command line."""
     for node in body_nodes(func):
         if isinstance(node, ast.Attribute) and _attr_chain(node) in ("sys.argv", "sys.exit"):
             return True
@@ -394,10 +394,10 @@ def _mentions(expr: ast.AST, name: str) -> bool:
 
 def validating_raises(func: Optional[ast.AST], name: str) -> List[Tuple[str, Optional[str]]]:
     """
-    Excepciones con las que la función valida el parámetro name, en orden de aparición: un raise
-    en el cuerpo de un if cuya condición lo menciona, o un assert sobre él. Son las que un valor
-    inválido de name puede disparar; un raise en otra rama depende de otra cosa, y exigirlo haría
-    fallar el test con una función correcta.
+    Exceptions the function uses to validate parameter name, in source order: a raise inside an
+    if whose condition mentions it, or an assert on it. Those are what an invalid value of name
+    can trigger; a raise in another branch depends on something else, and expecting it would make
+    the test fail against a correct function.
     """
     if func is None:
         return []
@@ -415,12 +415,12 @@ def validating_raises(func: Optional[ast.AST], name: str) -> List[Tuple[str, Opt
 
 
 def has_bare_assert(func: Optional[ast.AST]) -> bool:
-    """El cuerpo valida con un assert sin mensaje: el AssertionError que lanza tiene el texto vacío."""
+    """True when the body validates with a message-less assert: the AssertionError it raises has empty text."""
     return func is not None and any(isinstance(n, ast.Assert) and n.msg is None for n in body_nodes(func))  # type: ignore[arg-type]
 
 
 def accepts_none(param: ast.arg, default: Optional[ast.AST]) -> bool:
-    """El parámetro admite None por contrato: vale None por defecto o su anotación lo incluye."""
+    """The parameter accepts None by contract: it defaults to None or its annotation includes it."""
     if isinstance(default, ast.Constant) and default.value is None:
         return True
     if param.annotation is None:
@@ -435,10 +435,10 @@ def _extract_raises_and_flags(
     imports: Optional[ImportMap] = None,
 ) -> Tuple[List[Tuple[str, Optional[str]]], bool, List[str]]:
     """
-    Extrae del cuerpo AST (sin cruzar funciones/clases anidadas):
-    - Excepciones lanzadas explícitamente: [(ExcName, literal_msg_or_None)]
-    - Si hay riesgo de fallo con None (operadores aritméticos/comparación/raise/métodos)
-    - Objetivos de patch de las llamadas con efectos (E/S, sistema de archivos, procesos, red)
+    Extract from a function body (without crossing into nested functions or classes):
+    - Exceptions raised explicitly: [(ExcName, literal_msg_or_None)]
+    - Whether None could make it fail (arithmetic/comparison operators, raise, method calls)
+    - Patch targets for the calls with side effects (I/O, filesystem, processes, network)
     """
     imports = imports or ImportMap("")
     raises: List[Tuple[str, Optional[str]]] = []
@@ -474,7 +474,7 @@ def _extract_raises_and_flags(
 
 
 def _called_names(func_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> Tuple[Set[str], Set[str]]:
-    """(funciones llamadas por nombre, métodos llamados sobre self), sin entrar en funciones anidadas."""
+    """(functions called by name, methods called on self/cls), without entering nested functions."""
     plain: Set[str] = set()
     on_self: Set[str] = set()
     stack: List[ast.AST] = list(func_node.body)
@@ -508,28 +508,28 @@ def _propagate_step(direct: Dict[str, Set[Any]], edges: Dict[str, Set[str]]) -> 
 
 class UnitTestGenerator(ast.NodeVisitor):
     """
-    Generador automatizado de metadatos AST para pruebas unitarias (unittest/pytest)
-    incluyendo funciones sincrónicas, asíncronas y contratos de excepciones.
+    Collects, from a module's AST, the metadata the test emitters need: public functions and
+    classes, their signatures, sync/async kind, exception contracts and I/O to patch.
     """
 
     def __init__(self, filename: str, project: Optional[ProjectIndex] = None) -> None:
         self.filename: str = filename
-        # Con el nombre completo dentro del paquete: es el que usan los patch("<modulo>.rmtree").
+        # The fully qualified name inside the package, which is what patch("<module>.rmtree") needs.
         self.module = module_import(filename)[0]
         self.imports = ImportMap(self.module)
-        # Los demás módulos del proyecto: sus helpers también pueden hacer E/S.
+        # The project's other modules: their helpers can perform I/O too.
         self.project = project or ProjectIndex(filename)
-        # E/S de cada función del módulo, privadas incluidas, para quien llame a una desde otro módulo.
+        # I/O of every function in the module, private ones included, for callers in other modules.
         self.io_by_function: Dict[str, Set[str]] = {}
         self.io_always_by_function: Dict[str, bool] = {}
-        # Todas las funciones del módulo, incluidas las privadas: sirven para propagar la E/S
-        # de un helper (`_borrar`) a la función pública que lo llama.
+        # Every function in the module, private ones included: needed to propagate a helper's
+        # I/O (`_delete`) to the public function that calls it.
         self._all_nodes: Dict[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]] = {}
         self.functions: List[Tuple[str, List[str], Optional[ast.arguments]]] = []
         self.classes: List[Tuple[str, Optional[ast.arguments], List[Tuple[str, List[str], Optional[ast.arguments]]]]] = []
         self.function_meta: Dict[str, Dict[str, Any]] = {}
         self.function_nodes: Dict[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]] = {}
-        # Árbol del módulo: los emisores lo usan para resolver alias, clases y tipos de los parámetros.
+        # The module AST: the emitters use it to resolve aliases, classes and parameter types.
         self.tree: Optional[ast.Module] = None
 
     def visit_Module(self, node: ast.Module) -> None:
@@ -548,10 +548,9 @@ class UnitTestGenerator(ast.NodeVisitor):
 
     def _propagate(self) -> None:
         """
-        Si una función llama a otra del módulo, hereda su E/S (y sus dobles de prueba) y las
-        excepciones que puede lanzar: raises_reachable incluye las de sus helpers, raises solo
-        las que lanza ella misma. bare_assert dice si ella o un helper valida con un assert sin
-        mensaje.
+        A function that calls another function of the module inherits its I/O (and test doubles)
+        and the exceptions it can raise: raises_reachable includes its helpers' exceptions, raises
+        only its own. bare_assert says whether it or a helper validates with a message-less assert.
         """
         extracted = {key: _extract_raises_and_flags(fn, self.imports) for key, fn in self._all_nodes.items()}
         io_direct = {key: set(info[2]) | self._project_io(self._all_nodes[key]) for key, info in extracted.items()}
@@ -582,10 +581,10 @@ class UnitTestGenerator(ast.NodeVisitor):
 
     def _always_io(self, io: Dict[str, Set[str]]) -> Dict[str, bool]:
         """
-        Qué funciones hacen E/S en cualquier ejecución que acepte su entrada: una llamada de E/S que
-        siempre se alcanza, o una llamada siempre alcanzada a un helper del módulo que a su vez la
-        hace siempre (no basta con que la haga en alguna rama: send_telegram solo publica si hay
-        credenciales). Se repite hasta que nada cambia, para seguir cadenas de helpers.
+        Which functions perform I/O in every execution that accepts their input: an I/O call that
+        is always reached, or an always-reached call to a module helper that itself always does
+        I/O (doing it in some branch is not enough: send_telegram only posts when credentials are
+        set). Iterates to a fixed point so chains of helpers are followed.
         """
         reached = {key: always_reached_calls(fn) for key, fn in self._all_nodes.items() if io.get(key)}
         always: Dict[str, bool] = {key: False for key in self._all_nodes}
@@ -598,7 +597,7 @@ class UnitTestGenerator(ast.NodeVisitor):
         return always
 
     def _project_callee(self, call: ast.Call) -> Optional[Tuple[str, str]]:
-        """(módulo, función) si la llamada es a una función de otro módulo del proyecto."""
+        """(module, function) when the call targets a function in another project module."""
         names, modules = self.project.imports_of(self.module)
         func = call.func
         if isinstance(func, ast.Name) and func.id in names:
@@ -608,7 +607,7 @@ class UnitTestGenerator(ast.NodeVisitor):
         return None
 
     def _project_io(self, fn: FuncNode) -> Set[str]:
-        """La E/S de los helpers de otros módulos del proyecto a los que llama la función (export_rows escribe)."""
+        """I/O performed by helpers in other project modules that the function calls (export_rows writes a file)."""
         targets: Set[str] = set()
         for node in body_nodes(fn):
             callee = self._project_callee(node) if isinstance(node, ast.Call) else None
@@ -669,7 +668,7 @@ class UnitTestGenerator(ast.NodeVisitor):
             self.function_nodes[node.name] = node
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Clases públicas y sus métodos públicos. El setter de una propiedad y las firmas @overload no son objetivos."""
+        """Public classes and their public methods. Property setters and @overload signatures are not test targets."""
         if node.name.startswith("_"):
             return
         init_args: Optional[ast.arguments] = None

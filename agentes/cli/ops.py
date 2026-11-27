@@ -1,5 +1,5 @@
 """
-Comandos CLI de operación y utilidades: health, sla, serve, password, demo, list y doctor.
+Operations and utility commands: health, sla, serve, password, demo, list and doctor.
 """
 from __future__ import annotations
 
@@ -20,14 +20,14 @@ _PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def cmd_health(args: argparse.Namespace) -> int:
-    """Comprueba disco, carga del sistema y opcionalmente un puerto TCP o URL HTTP."""
+    """Check disk space and system load, plus an optional TCP port or HTTP URL."""
     from ..sre.health_checker import SystemHealthChecker
 
     tcp_host, tcp_port = None, None
     if args.tcp:
         host, sep, port = args.tcp.rpartition(":")
         if not sep or not host or not port.isdigit():
-            raise CliError(f"--tcp espera HOST:PUERTO y recibió {args.tcp!r}.", "Ejemplo: --tcp localhost:5432")
+            raise CliError(f"--tcp expects HOST:PORT and got {args.tcp!r}.", "Example: --tcp localhost:5432")
         tcp_host, tcp_port = host, int(port)
 
     report = SystemHealthChecker.check_health(
@@ -40,41 +40,41 @@ def cmd_health(args: argparse.Namespace) -> int:
         emit_json(report)
         return code
 
-    labels = {"disk": "Disco", "load": "Carga", "tcp": "TCP", "http": "HTTP"}
+    labels = {"disk": "Disk", "load": "Load", "tcp": "TCP", "http": "HTTP"}
     rows = []
     for check in report["checks"]:
         good = bool(check.get("ok", True))
         detail = check.get("detail", "")
         if check.get("name") == "load":
-            detail = f"media del último minuto: {check.get('load_1m', 0.0):.2f}"
+            detail = f"1-minute average: {check.get('load_1m', 0.0):.2f}"
         elif check.get("name") == "disk" and good and "free_mb" in check:
-            detail = f"{check['free_mb']:.0f} MB libres"
+            detail = f"{check['free_mb']:.0f} MB free"
         rows.append((
             labels.get(check.get("name"), check.get("name")),
-            ("OK" if good else "FALLO", "green" if good else "red"),
+            ("OK" if good else "FAILED", "green" if good else "red"),
             detail,
         ))
-    ui.title("Estado del sistema")
+    ui.title("System health")
     ui.out()
-    ui.table(["Sonda", "Estado", "Detalle"], rows)
+    ui.table(["Probe", "Status", "Detail"], rows)
     ui.out()
     if status == "HEALTHY":
-        ui.ok("HEALTHY: todas las sondas responden.")
+        ui.ok("HEALTHY: every probe passed.")
     elif status == "DEGRADED":
-        ui.warn("DEGRADED: falla una sonda externa, pero el sistema base está bien.")
+        ui.warn("DEGRADED: an external probe failed, but the base system is fine.")
     else:
-        ui.fail("UNHEALTHY: falla una sonda base.")
+        ui.fail("UNHEALTHY: a base probe failed.")
     if not args.tcp and not args.http:
-        ui.hint("Puedes añadir sondas con --tcp HOST:PUERTO y --http URL.")
+        ui.hint("Add probes with --tcp HOST:PORT and --http URL.")
     return code
 
 
 def cmd_sla(args: argparse.Namespace) -> int:
-    """Evalúa una tasa de errores frente a un umbral máximo permitido."""
+    """Compare an error rate against the maximum allowed rate."""
     from ..sre.alerting_engine import AlertingEngine
 
     if args.errors < 0 or args.total < 0 or args.errors > args.total:
-        raise CliError("--errors debe estar entre 0 y --total.")
+        raise CliError("--errors must be between 0 and --total.")
     alert, _ = AlertingEngine.evaluate_error_rate(args.total, args.errors, args.max_rate)
     rate = round(args.errors / args.total * 100, 2) if args.total else 0.0
     if args.json:
@@ -84,24 +84,25 @@ def cmd_sla(args: argparse.Namespace) -> int:
         })
         return 1 if alert else 0
     if not args.total:
-        ui.warn("Sin tráfico registrado: no hay tasa que evaluar.")
+        ui.warn("No traffic recorded: there is no rate to evaluate.")
     elif alert:
-        ui.fail(f"Tasa de errores del {rate}%: supera el límite del {args.max_rate}%.")
+        ui.fail(f"Error rate {rate}%: above the {args.max_rate}% limit.")
     else:
-        ui.ok(f"Tasa de errores del {rate}%: dentro del límite del {args.max_rate}%.")
+        ui.ok(f"Error rate {rate}%: within the {args.max_rate}% limit.")
     return 1 if alert else 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    """Arranca un servidor HTTP con /metrics (Prometheus) y /healthz."""
+    """Start an HTTP server exposing /metrics (Prometheus) and /healthz."""
     from ..sre.health_checker import SystemHealthChecker
     from ..sre.prometheus_exporter import PrometheusExporter
 
-    # Sin esto, al redirigir la salida (Docker, systemd) el mensaje de arranque queda en el búfer.
+    # Without line buffering, the startup message stays stuck in the buffer when output is
+    # redirected (Docker, systemd) and the operator never sees it.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
     if args.host in ("0.0.0.0", "::"):
-        ui.warn("Escucha en todas las interfaces: el servidor es accesible desde la red.")
+        ui.warn("Listening on every interface: the server is reachable from the network.")
     try:
         PrometheusExporter.serve(
             host=args.host,
@@ -109,7 +110,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             health_fn=lambda: SystemHealthChecker.check_health(min_free_mb=1.0),
         )
     except OSError as exc:
-        raise CliError(f"No se pudo abrir {args.host}:{args.port}: {exc}", "Prueba con otro puerto: --port 9200") from exc
+        raise CliError(f"Could not listen on {args.host}:{args.port}: {exc}", "Try another port: --port 9200") from exc
     return 0
 
 
@@ -117,22 +118,26 @@ def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
     if args.stdin:
         value = sys.stdin.readline().rstrip("\r\n")
     else:
-        value = getpass.getpass("Contraseña (no se muestra al escribir): ")
-        if confirm and value != getpass.getpass("Repítela: "):
-            raise CliError("Las dos contraseñas no coinciden.")
+        value = getpass.getpass("Password (not echoed): ")
+        if confirm and value != getpass.getpass("Repeat it: "):
+            raise CliError("The two passwords do not match.")
     if not value:
-        raise CliError("La contraseña está vacía.")
+        raise CliError("The password is empty.")
     return value
 
 
 def _strength_label(score: int) -> str:
-    return "fuerte" if score >= 6 else ("aceptable" if score == 5 else "débil")
+    return "strong" if score >= 6 else ("acceptable" if score == 5 else "weak")
+
+
+def _times(count: int) -> str:
+    return f"{count:,} time" + ("" if count == 1 else "s")
 
 
 def _breach_note(count: Optional[int]) -> str:
     if count is None:
-        return "no comprobada (sin conexión o modo --offline)"
-    return f"aparece {count:,} veces".replace(",", ".") if count else "no aparece"
+        return "not checked (no connection or --offline mode)"
+    return f"found {_times(count)}" if count else "not found"
 
 
 def _password_check(args: argparse.Namespace) -> int:
@@ -148,11 +153,11 @@ def _password_check(args: argparse.Namespace) -> int:
         emit_json({"score": score, "max_score": 6, "strength": label, "feedback": feedback, "breaches": breaches})
         return code
     if breaches:
-        ui.fail(f"Esta contraseña aparece {_breach_note(breaches)[8:]} en filtraciones conocidas. No la uses.")
-    (ui.ok if score >= 5 else ui.fail)(f"Contraseña {label} ({score} de 6 puntos).")
+        ui.fail(f"This password appears {_times(breaches)} in known breaches. Do not use it.")
+    (ui.ok if score >= 5 else ui.fail)(f"Password is {label} ({score} of 6 points).")
     for tip in feedback:
         ui.bullet(tip)
-    ui.hint(f"Filtraciones conocidas (Have I Been Pwned): {_breach_note(breaches)}.")
+    ui.hint(f"Known breaches (Have I Been Pwned): {_breach_note(breaches)}.")
     return code
 
 
@@ -169,18 +174,19 @@ def _password_hash(args: argparse.Namespace) -> int:
         emit_json({"hash": hashed, "backend": backend, "score": score, "breaches": breaches})
         return 0
     if breaches:
-        print(f"Aviso: esta contraseña aparece {_breach_note(breaches)[8:]} en filtraciones conocidas.", file=sys.stderr)
+        print(f"Warning: this password appears {_times(breaches)} in known breaches.", file=sys.stderr)
     if score < 5:
-        print(f"Aviso: la contraseña es {_strength_label(score)} ({score} de 6 puntos).", file=sys.stderr)
+        print(f"Warning: the password is {_strength_label(score)} ({score} of 6 points).", file=sys.stderr)
     if backend.startswith("pbkdf2"):
-        print("Aviso: se usa PBKDF2 con 600 000 iteraciones. Instala el extra 'crypto' para usar Argon2.", file=sys.stderr)
-    # El hash va solo a stdout para poder redirigirlo o capturarlo en un script.
+        print("Warning: using PBKDF2 with 600,000 iterations. Install the 'crypto' extra to use Argon2.", file=sys.stderr)
+    # Warnings go to stderr and only the hash goes to stdout, so it can be redirected or
+    # captured by a script.
     print(hashed)
     return 0
 
 
 def cmd_password(args: argparse.Namespace) -> int:
-    """Evalúa la fortaleza de una contraseña, genera su hash o verifica un hash existente."""
+    """Assess a password's strength, hash it, or verify it against an existing hash."""
     from ..defensive.auth_manager import AuthManager
 
     if args.action == "check":
@@ -193,33 +199,34 @@ def cmd_password(args: argparse.Namespace) -> int:
     if args.json:
         emit_json({"valid": bool(valid), "needs_rehash": rehash})
     elif valid:
-        ui.ok("La contraseña coincide con el hash.")
+        ui.ok("The password matches the hash.")
         if rehash:
             ui.warn(
-                "El hash usa un algoritmo o un número de iteraciones por debajo de lo recomendado. "
-                "Regenéralo con 'agentes password hash' y guárdalo en su lugar."
+                "The hash uses an algorithm or iteration count below the current recommendation. "
+                "Regenerate it with 'agentes password hash' and store the new one instead."
             )
     else:
-        ui.fail("La contraseña no coincide con el hash.")
+        ui.fail("The password does not match the hash.")
     return 0 if valid else 1
 
 
 def cmd_list(_: argparse.Namespace) -> int:
-    """Lista los 8 agentes disponibles en el ecosistema."""
-    ui.title(f"AGENTES v{__version__} · agentes disponibles")
+    """List the 8 available agents."""
+    ui.title(f"AGENTES v{__version__} · available agents")
     ui.out()
     ui.table(
-        ["Agente", "Paquete", "Qué hace"],
+        ["Agent", "Package", "What it does"],
         [((key, "bold"), folder, desc) for key, (folder, desc) in AGENTS.items()],
     )
     ui.out()
-    ui.hint("Demo de un agente: agentes demo <agente>   Todos los comandos: agentes")
+    ui.hint("An agent's demo: agentes demo <agent>   Every command: agentes")
     return 0
 
 
 def _run_demo(key: str) -> int:
     module, _ = AGENTS[key]
-    # Las demos escriben sus archivos de muestra con rutas relativas al directorio actual.
+    # The demos write their sample files with paths relative to the working directory, so
+    # each one runs from inside its own agent package and the caller's cwd is restored after.
     agent_dir = os.path.join(_PACKAGE_ROOT, key)
     cwd = os.getcwd()
     try:
@@ -231,7 +238,7 @@ def _run_demo(key: str) -> int:
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
-    """Ejecuta la demo de un agente concreto o de todos ellos."""
+    """Run the demo of one agent, or of all of them."""
     key = args.agent.lower().strip()
     if key == "all":
         for name in AGENTS:
@@ -240,8 +247,8 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 0
     if key not in AGENTS:
         close = difflib.get_close_matches(key, list(AGENTS), n=1)
-        hint = f"¿Querías decir '{close[0]}'? " if close else ""
-        raise CliError(f"Agente desconocido: '{args.agent}'.", f"{hint}Disponibles: {', '.join(AGENTS)} o all.")
+        hint = f"Did you mean '{close[0]}'? " if close else ""
+        raise CliError(f"Unknown agent: '{args.agent}'.", f"{hint}Available: {', '.join(AGENTS)} or all.")
     return _run_demo(key)
 
 
@@ -253,7 +260,7 @@ def _module_available(name: str) -> bool:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    """Comprueba el entorno Python y la disponibilidad de dependencias obligatorias y opcionales."""
+    """Check the Python environment and which required and optional dependencies are available."""
     from ..defensive.auth_manager import AuthManager
     from ..quality.static_checker import StaticCodeAnalyzer
 
@@ -261,17 +268,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     yaml_ok = _module_available("yaml")
     checks = [
         {"name": "Python", "ok": py_ok, "required": True, "detail": sys.version.split()[0],
-         "fix": "Se necesita Python 3.9 o superior."},
-        {"name": "PyYAML", "ok": yaml_ok, "required": True, "detail": "validación de YAML y Kubernetes",
+         "fix": "Python 3.9 or later is required."},
+        {"name": "PyYAML", "ok": yaml_ok, "required": True, "detail": "YAML and Kubernetes validation",
          "fix": "pip install PyYAML"},
         {"name": "bandit", "ok": StaticCodeAnalyzer.bandit_command() is not None, "required": False,
-         "detail": "segundo motor de análisis estático", "fix": "pip install bandit   (sin él se usa el motor AST propio)"},
+         "detail": "second static analysis engine", "fix": "pip install bandit   (without it, the built-in AST engine is used)"},
         {"name": "argon2-cffi", "ok": _module_available("argon2"), "required": False,
-         "detail": "hashing de contraseñas con Argon2", "fix": "pip install argon2-cffi"},
+         "detail": "password hashing with Argon2", "fix": "pip install argon2-cffi"},
         {"name": "bcrypt", "ok": _module_available("bcrypt"), "required": False,
-         "detail": "hashing de contraseñas con bcrypt", "fix": "pip install bcrypt"},
+         "detail": "password hashing with bcrypt", "fix": "pip install bcrypt"},
         {"name": "pytest", "ok": _module_available("pytest"), "required": False,
-         "detail": "ejecutar suites pytest generadas", "fix": "pip install pytest"},
+         "detail": "run generated pytest suites", "fix": "pip install pytest"},
     ]
     backend = AuthManager.get_available_crypto_backend()
     workdir = os.environ.get("AGENTES_WORKDIR")
@@ -282,40 +289,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         emit_json({"version": __version__, "checks": checks, "crypto_backend": backend, "workdir": workdir})
         return code
 
-    ui.title(f"Diagnóstico de AGENTES v{__version__}")
+    ui.title(f"AGENTES v{__version__} diagnostics")
     ui.out()
     rows = []
     for c in checks:
         if c["ok"]:
             state: Any = ("OK", "green")
         elif c["required"]:
-            state = ("FALTA", "red", "bold")
+            state = ("MISSING", "red", "bold")
         else:
-            state = ("opcional", "yellow")
+            state = ("optional", "yellow")
         rows.append((c["name"], state, c["detail"] if c["ok"] else c["fix"]))
-    ui.table(["Componente", "Estado", "Detalle"], rows)
+    ui.table(["Component", "Status", "Detail"], rows)
     ui.out()
     ui.kv([
-        ("Hashing de contraseñas", backend),
-        ("Salida de las demos", workdir or "junto a cada agente (define AGENTES_WORKDIR para cambiarlo)"),
-        ("Color en terminal", "activado" if ui.color else "desactivado"),
+        ("Password hashing", backend),
+        ("Demo output", workdir or "next to each agent (set AGENTES_WORKDIR to change it)"),
+        ("Terminal colour", "on" if ui.color else "off"),
     ], indent=0)
     ui.out()
     if missing_required:
-        ui.fail("Faltan componentes obligatorios.")
+        ui.fail("Required components are missing.")
     elif all(c["ok"] for c in checks):
-        ui.ok("Todo instalado.")
+        ui.ok("Everything is installed.")
     else:
-        ui.ok("Listo para usar. Los componentes opcionales amplían funciones, pero no son necesarios.")
-        ui.hint('Para instalarlos todos: pip install -e ".[all]"')
+        ui.ok("Ready to use. The optional components add features, but they are not required.")
+        ui.hint('To install them all: pip install -e ".[all]"')
     return code
 
 
 def print_overview() -> None:
-    """Muestra la pantalla principal con todos los grupos de comandos del CLI."""
-    ui.title(f"agentes {__version__} · DevSecOps, SRE y QA para proyectos Python")
+    """Print the overview screen with every command group."""
+    ui.title(f"agentes {__version__} · DevSecOps, SRE and QA for Python projects")
     ui.out()
-    ui.out("Uso: agentes <comando> [opciones]")
+    ui.out("Usage: agentes <command> [options]")
     width = max(len(f"{name} {arg}".strip()) for _, cmds in COMMAND_GROUPS for name, arg, _ in cmds)
     for group, cmds in COMMAND_GROUPS:
         ui.section(group)
@@ -323,9 +330,9 @@ def print_overview() -> None:
             label = f"{name} {arg}".strip()
             padding = " " * (width - len(label))
             ui.out(f"  {ui.style(name, 'cyan', 'bold')}{label[len(name):]}{padding}  {desc}")
-    ui.section("Para empezar")
-    ui.out("  agentes doctor         comprueba la instalación")
-    ui.out("  agentes pipeline .     audita el proyecto del directorio actual")
-    ui.out("  agentes generate       muestra todo lo que se puede generar")
+    ui.section("Getting started")
+    ui.out("  agentes doctor         check the installation")
+    ui.out("  agentes pipeline .     audit the project in the current directory")
+    ui.out("  agentes generate       show everything that can be generated")
     ui.out()
-    ui.hint("Ayuda de un comando: agentes <comando> -h    Opciones comunes: --json, --offline, --no-color")
+    ui.hint("A command's help: agentes <command> -h    Common options: --json, --offline, --no-color")

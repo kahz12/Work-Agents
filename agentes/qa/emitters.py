@@ -1,9 +1,9 @@
 """
-Emisores de suites de pruebas unittest y pytest adversarias.
+Emitters for unittest suites and adversarial pytest suites.
 
-Cada objetivo (función, método o propiedad) se describe con un TargetSpec construido a partir del
-plan de llamada de call_plan: qué argumentos pasar, cómo crear el objeto de un método, qué valores
-son supuestos y qué no se sabe construir. Los emisores solo escriben los tests.
+Each target (function, method or property) is described by a TargetSpec built from call_plan's
+call plan: which arguments to pass, how to create a method's object, which values are assumed
+and what cannot be built. The emitters only write the tests; every decision is made upstream.
 """
 from __future__ import annotations
 
@@ -29,30 +29,30 @@ from .expected_values import Outcome, fallback_assertion, is_pure_binop, static_
 from .sample_values import first_invalid_argument
 
 SOURCE_COMMENT = {
-    "static": "Valor calculado a partir del cuerpo de la función.",
-    "recorded": "Valor grabado al generar la suite: fija el comportamiento actual (test de caracterización).",
+    "static": "Value computed from the function body.",
+    "recorded": "Value recorded when the suite was generated: pins the current behaviour (characterisation test).",
 }
 RAISES_COMMENT = {
-    "static": "excepción deducida del cuerpo de la función con estos valores.",
-    "recorded": "excepción grabada al generar la suite (test de caracterización).",
+    "static": "exception derived from the function body for these values.",
+    "recorded": "exception recorded when the suite was generated (characterisation test).",
 }
 RECORDED_HEADER = [
-    "# Los valores marcados como grabados se obtuvieron ejecutando el código al generar la suite.",
-    "# Fijan el comportamiento actual: si hoy hay un fallo, el test lo da por bueno. Revísalos.",
+    "# Values marked as recorded were obtained by running the code when the suite was generated.",
+    "# They pin down the current behaviour: if there is a bug today, the test accepts it. Review them.",
 ]
-# Lo que lanza Python cuando un valor de ejemplo supuesto no es del tipo que espera la función.
+# What Python raises when an assumed sample value is not of the type the function expects.
 _MISFIT = "(TypeError, AttributeError)"
-# Lo que lanza cuando procesa los datos de un doble de E/S (un MagicMock, un archivo vacío) como
-# si fueran reales: json.loads(MagicMock) da TypeError; json.load de un archivo vacío, ValueError.
+# What it raises when it processes the data of an I/O double (a MagicMock, an empty file) as if
+# it were real: json.loads(MagicMock) raises TypeError; json.load on an empty file, ValueError.
 _FAKE_IO_MISFIT = "(TypeError, AttributeError, ValueError)"
 
 
 class TargetSpec(NamedTuple):
     """
-    Un objetivo de los tests. name identifica el objetivo en el nombre del test (func o
-    Clase_metodo); call_target es lo que se llama (func, obj.metodo o Clase.metodo); setup, la
-    expresión que crea obj, y setup_assumed, si se construye con valores supuestos; skip, por qué
-    no se puede probar; access, "call" o "property" (se lee, no se llama).
+    A test target. name identifies it in the test name (func or Class_method); call_target is
+    what gets called (func, obj.method or Class.method); setup, the expression that creates obj,
+    and setup_assumed, whether it is built from assumed values; skip, why it cannot be tested;
+    access, "call" or "property" (read, not called).
     """
 
     name: str
@@ -69,35 +69,35 @@ class TargetSpec(NamedTuple):
 
     @property
     def is_async(self) -> bool:
-        """El objetivo es una corrutina: se llama con asyncio.run."""
+        """The target is a coroutine function, so it is called through asyncio.run."""
         return bool(self.meta.get("is_async"))
 
     def call(self, args: Optional[str] = None) -> str:
-        """Expresión que invoca el objetivo (con args, o con los del plan); las corrutinas, con asyncio.run."""
+        """Expression that invokes the target (with args, or the plan's); coroutines go through asyncio.run."""
         if self.access == "property":
             return self.call_target
         expr = f"{self.call_target}({self.plan.arg_str if args is None else args})"
         return f"asyncio.run({expr})" if self.is_async else expr
 
 
-_CLI_REASON = "Lee sys.argv o termina el proceso: pruébala por su línea de órdenes (subprocess o CliRunner)."
-_ENDLESS_REASON = ("Entra en un bucle sin fin (while True sin break, return ni raise): pruébala con un "
-                   "evento de parada o un número de vueltas.")
+_CLI_REASON = "It reads sys.argv or ends the process: test it through its command line (subprocess or CliRunner)."
+_ENDLESS_REASON = ("It enters an endless loop (while True with no break, return or raise): test it with a "
+                   "stop event or an iteration limit.")
 
 
 def _skip_reason(plan: CallPlan, meta: Dict[str, Any]) -> Optional[str]:
-    """Por qué no se puede llamar al objetivo en un test unitario; None si se puede."""
+    """Why the target cannot be called from a unit test; None when it can."""
     if meta.get("cli_entrypoint"):
         return _CLI_REASON
     if meta.get("endless_loop"):
         return _ENDLESS_REASON
     if not plan.missing:
         return None
-    return f"Falta un valor de ejemplo para {', '.join(plan.missing)}: complétalo a mano."
+    return f"No sample value for {', '.join(plan.missing)}: fill it in by hand."
 
 
 def build_targets(visitor: UnitTestGenerator, ctx: SampleContext) -> List[TargetSpec]:
-    """Un TargetSpec por función pública y por método o propiedad pública de cada clase pública."""
+    """One TargetSpec per public function and per public method or property of each public class."""
     specs: List[TargetSpec] = []
     for func_name, _, _ in visitor.functions:
         snapshot = ctx.snapshot()
@@ -127,13 +127,13 @@ def build_targets(visitor: UnitTestGenerator, ctx: SampleContext) -> List[Target
 
 def _forget_if_skipped(spec: TargetSpec, ctx: SampleContext,
                        snapshot: Tuple[Set[str], Set[str], Dict[str, Set[str]]]) -> None:
-    """Un objetivo omitido no usa nada del módulo: lo que anotó al planificarlo no se importa."""
+    """A skipped target uses nothing from the module, so whatever its planning recorded is not imported."""
     if spec.skip:
         ctx.restore(snapshot)
 
 
 def io_targets(io_calls: List[str]) -> List[str]:
-    """Objetivos de patch para cada llamada de E/S detectada, sin repetir."""
+    """Patch targets for every detected I/O call, without duplicates."""
     targets: List[str] = []
     for target in io_calls:
         if target and target not in targets:
@@ -143,9 +143,9 @@ def io_targets(io_calls: List[str]) -> List[str]:
 
 def absorb_blocked(outcome: Optional[Outcome], targets: List[str]) -> Tuple[Optional[Outcome], List[str]]:
     """
-    Al grabar, la función intentó escribir, borrar, lanzar un proceso o conectarse (quizá a
-    través de otro módulo) y se bloqueó. No hay valor fiable que afirmar, pero el test debe
-    sustituir esas llamadas para no hacerlas de verdad.
+    While recording, the function tried to write, delete, start a process or connect (perhaps
+    through another module) and was blocked. There is no reliable value to assert, but the test
+    must still patch those calls so it never performs them for real.
     """
     if outcome is None or outcome[0] != "blocked":
         return outcome, targets
@@ -153,15 +153,15 @@ def absorb_blocked(outcome: Optional[Outcome], targets: List[str]) -> Tuple[Opti
     return None, targets + extra
 
 
-# Dobles de open(): un MagicMock devolvería otro MagicMock en read(), y el código que lee el
-# archivo (un parser, un bucle de read()) no terminaría nunca. Se simula un archivo vacío.
+# Doubles for open(): a MagicMock would return another MagicMock from read(), and code reading
+# the file (a parser, a read() loop) would never finish. An empty file is simulated instead.
 _OPEN_TARGETS = frozenset({"builtins.open", "io.open"})
 
 
 def patch_clause(targets: List[str], *, named: bool = False) -> str:
     """
-    Construye la cláusula patch(...) de los dobles de E/S: autospec, o un archivo vacío para
-    open(). Con named, cada doble queda en io_0, io_1...: para el test que comprueba si se llamó.
+    Build the patch(...) clause for the I/O doubles: autospec, or an empty file for open(). With
+    named, each double is bound to io_0, io_1... for tests that check whether it was called.
     """
     return ", ".join(
         (f'patch("{t}", new=mock_open(read_data=""))' if t in _OPEN_TARGETS else f'patch("{t}", autospec=True)')
@@ -176,9 +176,9 @@ def _uses_open_double(specs: List["TargetSpec"]) -> bool:
 
 def declared_raises(spec: TargetSpec, *, reachable: bool = False) -> List[Tuple[str, Optional[str]]]:
     """
-    Las excepciones que lanza el objetivo y que la suite puede nombrar, con su mensaje; con
-    reachable, también las de los helpers del módulo a los que llama. Las que define o importa el
-    módulo se anotan para que la suite las importe.
+    The exceptions the target raises that the suite can name, with their messages; with
+    reachable, also those of the module helpers it calls. Exceptions defined or imported by the
+    module are recorded so the suite imports them.
     """
     raises = spec.meta.get("raises_reachable" if reachable else "raises") or spec.meta.get("raises") or []
     found = [(name, msg) for name, msg in raises if spec.ctx.exception_import(name) is not None]
@@ -189,8 +189,8 @@ def declared_raises(spec: TargetSpec, *, reachable: bool = False) -> List[Tuple[
 
 class Rejection(NamedTuple):
     """
-    Un test de entrada inválida: el argumento position recibe value y la función tiene que
-    lanzar exceptions (un nombre o una tupla), con un mensaje que case con pattern si se conoce.
+    An invalid-input test: the argument at position receives value and the function must raise
+    exceptions (a name or a tuple), with a message matching pattern when it is known.
     """
 
     position: int
@@ -201,10 +201,10 @@ class Rejection(NamedTuple):
 
 def expected_rejection(spec: TargetSpec) -> Optional[Rejection]:
     """
-    El test de entrada inválida, solo si la función valida el parámetro que recibe el valor hostil
-    (un raise bajo un if que lo menciona, o un assert sobre él). Sin esa validación, exigir una
-    excepción haría fallar el test con una función correcta: walk_files("../../etc/passwd")
-    recorre una ruta relativa sin quejarse, y es lo que debe hacer.
+    The invalid-input test, only when the function validates the parameter that receives the
+    hostile value (a raise under an if that mentions it, or an assert on it). Without that
+    validation, demanding an exception would fail the test against a correct function:
+    walk_files("../../etc/passwd") walks a relative path without complaint, as it should.
     """
     invalid = first_invalid_argument(spec.plan.names)
     if invalid is None or spec.access == "property":
@@ -217,7 +217,7 @@ def expected_rejection(spec: TargetSpec) -> Optional[Rejection]:
     names = list(dict.fromkeys(name for name, _ in raises))
     for name in names:
         spec.ctx.use_exception(name)
-    # Un patrón solo si se conocen todos los mensajes y ninguno es vacío: cualquiera puede ser el que salte.
+    # Only use a pattern when every message is known and none is empty: any of them may be the one raised.
     messages = list(dict.fromkeys(msg for _, msg in raises if msg))
     pattern = None
     if len(messages) == 1 and all(msg for _, msg in raises):
@@ -229,9 +229,10 @@ def expected_rejection(spec: TargetSpec) -> Optional[Rejection]:
 
 def fallback_kind(spec: TargetSpec) -> Tuple[str, str]:
     """
-    Qué se puede afirmar del valor sin conocerlo (fallback_assertion). Si algún argumento es la
-    función de ejemplo, que devuelve None, lo que devuelve el objetivo puede ser lo que devuelva
-    ella (interruptible(call) devuelve call()): el tipo anotado o que no sea None dejan de ser seguros.
+    What can be asserted about the value without knowing it (fallback_assertion). When one of the
+    arguments is the sample callable, which returns None, the target may return whatever it
+    returns (interruptible(call) returns call()), so neither the annotated type nor "not None"
+    is safe any more.
     """
     kind, type_name = fallback_assertion(spec.func_node)  # type: ignore[arg-type]
     callable_sample = KIND_SAMPLES["callable"]
@@ -243,10 +244,10 @@ def fallback_kind(spec: TargetSpec) -> Tuple[str, str]:
 
 def io_assertion(spec: TargetSpec) -> str:
     """
-    Qué se puede afirmar de un objetivo con la E/S sustituida y sin valor conocido: "called" si
-    la hace en cualquier ejecución que acepte su entrada (se comprueba que delega en los dobles),
-    "none" si nunca devuelve nada, y "" si nada es seguro (la E/S está en una rama, o el valor
-    depende de los dobles).
+    What can be asserted about a target with its I/O patched and no known value: "called" when it
+    performs the I/O in every execution that accepts its input (the test checks it delegates to
+    the doubles), "none" when it never returns anything, and "" when nothing is safe (the I/O sits
+    in a branch, or the value depends on the doubles).
     """
     if spec.meta.get("io_always"):
         return "called"
@@ -256,12 +257,12 @@ def io_assertion(spec: TargetSpec) -> str:
 
 
 def io_called_expr(targets: List[str]) -> str:
-    """Expresión booleana que comprueba si se invocó alguno de los dobles de E/S."""
+    """Boolean expression that checks whether any of the I/O doubles was called."""
     return " or ".join(f"io_{i}.called" for i in range(len(targets)))
 
 
 def recording_calls(visitor: UnitTestGenerator) -> Dict[str, str]:
-    """Expresiones a grabar: funciones y métodos sin E/S ni resultados no deterministas."""
+    """Expressions to record: functions and methods with no I/O and no non-deterministic results."""
     calls: Dict[str, str] = {}
     for spec in build_targets(visitor, SampleContext(visitor.tree, visitor.project)):
         if spec.skip or spec.meta.get("io_calls") or uses_nondeterminism(spec.func_node, NON_DET_CALLS):  # type: ignore[arg-type]
@@ -280,7 +281,7 @@ def outcome_for(
     samples: List[str],
     recorded: Optional[Dict[str, Outcome]],
 ) -> Tuple[Optional[Outcome], str]:
-    """Determina el resultado esperado usando primero grabación y luego evaluación estática."""
+    """Expected outcome, taken from the recording first and from static evaluation otherwise."""
     if recorded and key in recorded:
         return recorded[key], "recorded"
     outcome = static_outcome(func_node, kept_args, samples)  # type: ignore[arg-type]
@@ -289,8 +290,8 @@ def outcome_for(
 
 def _spec_outcome(spec: TargetSpec, recorded: Optional[Dict[str, Outcome]]) -> Tuple[Optional[Outcome], str]:
     """
-    Resultado esperado del objetivo. Con valores supuestos, un TypeError o un AttributeError
-    solo dice que el supuesto no encaja con la función, no cómo se comporta: no se afirma.
+    Expected outcome for the target. With assumed values, a TypeError or AttributeError only
+    shows that the assumption does not fit the function, not how it behaves, so it is not asserted.
     """
     if spec.access == "property":
         outcome, source = (recorded[spec.name], "recorded") if recorded and spec.name in recorded else (None, "")
@@ -305,19 +306,19 @@ def _spec_outcome(spec: TargetSpec, recorded: Optional[Dict[str, Outcome]]) -> T
 
 
 def is_float_literal(text: str) -> bool:
-    """True si la expresión literal evaluada corresponde a un float."""
+    """True when the literal expression evaluates to a float."""
     try:
         return isinstance(ast.literal_eval(text), float)
     except (ValueError, SyntaxError):
         return False
 
 
-# --- Bloques comunes a los dos emisores ----------------------------------------------------------
+# --- Building blocks shared by both emitters ----------------------------------------------------
 
-# Aislamiento de la suite: un test generado no sale a la red ni espera a la entrada estándar. Las
-# llamadas de red que el análisis no ve (las hace otro módulo) fallan con OSError, como sin red,
-# y quien lea la entrada estándar la encuentra vacía. Las conexiones locales siguen funcionando:
-# en Windows, asyncio las usa para su bucle de eventos.
+# Suite isolation: a generated test never reaches the network or waits on standard input.
+# Network calls the analysis cannot see (made by another module) fail with OSError, as they
+# would offline, and anything reading standard input finds it empty. Local connections keep
+# working, because asyncio on Windows uses them for its event loop.
 _ISOLATION_HELPERS = [
     '_QA_LOCAL_HOSTS = (None, "localhost", "127.0.0.1", "::1")',
     "_qa_real_connect = socket.socket.connect",
@@ -325,17 +326,17 @@ _ISOLATION_HELPERS = [
     "",
     "",
     "def _qa_local_connect(sock, address):",
-    '    """Solo conexiones locales: un test generado no sale a la red."""',
+    '    """Local connections only: a generated test never reaches the network."""',
     "    host = address[0] if isinstance(address, tuple) else None",
     "    if host not in _QA_LOCAL_HOSTS:",
-    '        raise OSError(f"Red bloqueada en los tests generados: {address!r}")',
+    '        raise OSError(f"Network blocked in generated tests: {address!r}")',
     "    return _qa_real_connect(sock, address)",
     "",
     "",
     "def _qa_local_getaddrinfo(host, *args, **kwargs):",
-    '    """Solo nombres locales: sin red no se resuelve ningún otro."""',
+    '    """Local names only: without network access nothing else resolves."""',
     "    if host not in _QA_LOCAL_HOSTS:",
-    '        raise socket.gaierror(f"Red bloqueada en los tests generados: {host!r}")',
+    '        raise socket.gaierror(f"Network blocked in generated tests: {host!r}")',
     "    return _qa_real_getaddrinfo(host, *args, **kwargs)",
     "",
     "",
@@ -343,19 +344,19 @@ _ISOLATION_HELPERS = [
     "    return io.TextIOWrapper(io.BytesIO())",
     "",
     "",
-    "# Segundos que puede durar cada test; 0 quita el límite.",
+    "# Seconds each test may run; 0 removes the limit.",
     "_QA_TIMEOUT = 10",
     "",
     "",
     "class _QaTimeout(BaseException):",
-    '    """El test siguió corriendo tras omitirlo: se corta con algo que un except Exception no atrapa."""',
+    '    """The test kept running after being skipped: stop it with something except Exception cannot catch."""',
     "",
     "",
     "def _qa_time_limit(skip):",
     '    """',
-    "    Arma el límite de tiempo del test y devuelve con qué desarmarlo. Al agotarse, skip omite el",
-    "    test; si el código se traga esa excepción y sigue, a los dos segundos lo corta _QaTimeout.",
-    "    Sin SIGALRM (Windows) o fuera del hilo principal no hay límite.",
+    "    Arm the test's time limit and return the callable that disarms it. When it expires, skip",
+    "    skips the test; if the code swallows that exception and carries on, _QaTimeout stops it two",
+    "    seconds later. Without SIGALRM (Windows) or outside the main thread there is no limit.",
     '    """',
     '    if not _QA_TIMEOUT or not hasattr(signal, "SIGALRM") or threading.current_thread() is not threading.main_thread():',
     "        return lambda: None",
@@ -364,9 +365,9 @@ _ISOLATION_HELPERS = [
     "    def _on_alarm(signum, frame):",
     "        fired.append(signum)",
     "        if len(fired) == 1:",
-    '            skip(f"No terminó en {_QA_TIMEOUT} s con los valores de ejemplo: un bucle sin fin, una espera "',
-    '                 "o una interfaz interactiva.")',
-    '        raise _QaTimeout(f"No terminó en {_QA_TIMEOUT} s y el código se tragó la omisión.")',
+    '            skip(f"Did not finish within {_QA_TIMEOUT} s with the sample values: an endless loop, a wait "',
+    '                 "or an interactive interface.")',
+    '        raise _QaTimeout(f"Did not finish within {_QA_TIMEOUT} s and the code swallowed the skip.")',
     "",
     "    previous = signal.signal(signal.SIGALRM, _on_alarm)",
     "    signal.setitimer(signal.ITIMER_REAL, _QA_TIMEOUT, 2)",
@@ -379,63 +380,63 @@ _ISOLATION_HELPERS = [
 ]
 
 def _setup_lines(spec: TargetSpec, ind: str, skip_call: str) -> List[str]:
-    """Las líneas que crean obj. Si se construye con valores supuestos y no encajan, el test se omite."""
+    """The lines that create obj. When it is built from assumed values that do not fit, the test is skipped."""
     if not spec.setup:
         return []
     if not spec.setup_assumed:
         return [f"{ind}obj = {spec.setup}"]
     return [
-        f"{ind}# El objeto se crea con valores supuestos: si no encajan con la clase, el test se omite.",
+        f"{ind}# The object is built from assumed values: if they do not fit the class, the test is skipped.",
         f"{ind}try:",
         f"{ind}    obj = {spec.setup}",
         f"{ind}except {_MISFIT} as exc:",
-        f'{ind}    {skip_call}(f"No se pudo crear el objeto con valores supuestos: {{exc}}")',
+        f'{ind}    {skip_call}(f"Could not create the object from assumed values: {{exc}}")',
     ]
 
 
 def _call_lines(spec: TargetSpec, ind: str, statement: str, skip_call: str, fake_io: bool = False) -> List[str]:
     """
-    La sentencia que llama al objetivo (result = f(...)). Si usa valores supuestos que no encajan
-    con la función, o si con fake_io procesa los datos de los dobles de E/S y no le sirven, el
-    test se omite: eso no dice nada de cómo se comporta con datos reales.
+    The statement that calls the target (result = f(...)). When it uses assumed values that do
+    not fit the function, or (with fake_io) it chokes on the data the I/O doubles return, the test
+    is skipped: that says nothing about how it behaves with real data.
     """
     if fake_io:
         return [
-            f"{ind}# Los dobles de E/S devuelven datos simulados: si la función no puede procesarlos, el test se omite.",
+            f"{ind}# The I/O doubles return simulated data: if the function cannot process it, the test is skipped.",
             f"{ind}try:",
             f"{ind}    {statement}",
             f"{ind}except {_FAKE_IO_MISFIT} as exc:",
-            f'{ind}    {skip_call}(f"Los valores de ejemplo o los datos simulados de la E/S no encajan: {{exc}}")',
+            f'{ind}    {skip_call}(f"The sample values or the simulated I/O data do not fit: {{exc}}")',
         ]
     if not spec.plan.assumed:
         return [f"{ind}{statement}"]
     names = ", ".join(spec.plan.assumed)
     return [
-        f"{ind}# Valores de ejemplo supuestos para {names}: si no encajan con la función, el test se omite.",
+        f"{ind}# Assumed sample values for {names}: if they do not fit the function, the test is skipped.",
         f"{ind}try:",
         f"{ind}    {statement}",
         f"{ind}except {_MISFIT} as exc:",
-        f'{ind}    {skip_call}(f"Los valores supuestos para {names} no encajan con la función: {{exc}}")',
+        f'{ind}    {skip_call}(f"The assumed values for {names} do not fit the function: {{exc}}")',
     ]
 
 
 def _with_doubles(targets: List[str]) -> str:
     """
-    Los dobles de E/S como primeros gestores de una sentencia with, o nada si no hay E/S. Todo
-    test que llama al objetivo los necesita: si no, la llamada haría la E/S de verdad.
+    The I/O doubles as the first context managers of a with statement, or "" when there is no
+    I/O. Every test that calls the target needs them; otherwise the call would do the I/O for real.
     """
     return f"{patch_clause(targets)}, " if targets else ""
 
 
 def _with_arg(plan: CallPlan, index: int, expr: str) -> str:
-    """Los argumentos del plan con el posicional index sustituido por expr."""
+    """The plan's arguments with the positional one at index replaced by expr."""
     positional = list(plan.positional)
     positional[index] = expr
     return ", ".join([*positional, *plan.keywords])
 
 
 # ---------------------------------------------------------------------------
-# Emisor unittest
+# unittest emitter
 # ---------------------------------------------------------------------------
 
 def _emit_unittest_fallback_assert(test_code: List[str], ind: str, spec: TargetSpec) -> None:
@@ -446,10 +447,10 @@ def _emit_unittest_fallback_assert(test_code: List[str], ind: str, spec: TargetS
         test_code.append(f"{ind}self.assertIsNone(result)")
     elif kind == "not_none":
         test_code.append(f"{ind}self.assertIsNotNone(result)")
-        test_code.append(f"{ind}# Valor exacto desconocido: fíjalo a mano o genera la suite con --record.")
+        test_code.append(f"{ind}# Exact value unknown: pin it by hand or generate the suite with --record.")
     else:
-        test_code.append(f"{ind}# Valor desconocido: este test solo comprueba que no hay excepción.")
-        test_code.append(f"{ind}# Fíjalo a mano o genera la suite con --record.")
+        test_code.append(f"{ind}# Value unknown: this test only checks that no exception is raised.")
+        test_code.append(f"{ind}# Pin it by hand or generate the suite with --record.")
         test_code.append(f"{ind}_ = result")
 
 
@@ -474,18 +475,18 @@ def _emit_unittest_result_asserts(
     if targets:
         expected = io_assertion(spec)
         if expected == "called":
-            test_code.append(f"{ind}self.assertTrue({io_called_expr(targets)}, \"no usa la E/S sustituida\")")
+            test_code.append(f"{ind}self.assertTrue({io_called_expr(targets)}, \"does not use the patched I/O\")")
         elif expected == "none":
             test_code.append(f"{ind}self.assertIsNone(result)")
         else:
-            test_code.append(f"{ind}# Con la E/S sustituida el valor depende de los dobles: basta con que no falle.")
+            test_code.append(f"{ind}# With the I/O patched the value depends on the doubles: not failing is enough.")
         return
     _emit_unittest_fallback_assert(test_code, ind, spec)
 
 
 def _emit_unittest_skipped(test_code: List[str], name: str, label: str, reason: str) -> None:
     test_code.append(f"    def test_{name}_happy_path(self):")
-    test_code.append(f'        """{label}: no se puede probar sin completarlo a mano."""')
+    test_code.append(f'        """{label}: cannot be tested without completing it by hand."""')
     test_code.append(f"        self.skipTest({reason!r})")
     test_code.append("")
 
@@ -500,13 +501,13 @@ def _emit_unittest_happy_path(
 
     name = f"test_{spec.name}_sample_input_raises" if raises_outcome else f"test_{spec.name}_happy_path"
     test_code.append(f"    def {name}(self):")
-    test_code.append(f'        """{spec.label} con valores de ejemplo."""')
+    test_code.append(f'        """{spec.label} with sample values."""')
     test_code.append("        # Arrange")
     test_code.extend(_setup_lines(spec, "        ", "self.skipTest"))
     ind = "        "
     expected = io_assertion(spec) if targets and outcome is None else ""
     if targets:
-        test_code.append(f"        # E/S sustituida por dobles: {', '.join(targets)}")
+        test_code.append(f"        # I/O replaced by test doubles: {', '.join(targets)}")
         test_code.append(f"        with {patch_clause(targets, named=expected == 'called')}:")
         ind = "            "
     if raises_outcome and outcome is not None:
@@ -531,7 +532,7 @@ def _emit_unittest_invalid_input(test_code: List[str], spec: TargetSpec, targets
     if rejection is None:
         return
     test_code.append(f"    def test_{spec.name}_invalid_input(self):")
-    test_code.append(f'        """Entrada inválida para {spec.label}: la función la valida y la rechaza."""')
+    test_code.append(f'        """Invalid input for {spec.label}: the function validates it and rejects it."""')
     test_code.append("        # Arrange")
     test_code.extend(_setup_lines(spec, "        ", "self.skipTest"))
     test_code.append("        # Act & Assert")
@@ -545,7 +546,7 @@ def _emit_unittest_invalid_input(test_code: List[str], spec: TargetSpec, targets
 
 
 def emit_unittest_call_tests(test_code: List[str], spec: TargetSpec, recorded: Optional[Dict[str, Outcome]] = None) -> None:
-    """Emite los métodos de prueba unittest (happy path e invalid input) para un objetivo."""
+    """Emit the unittest test methods (happy path and invalid input) for one target."""
     if spec.skip:
         _emit_unittest_skipped(test_code, spec.name, spec.label, spec.skip)
         return
@@ -561,13 +562,13 @@ def _emit_unittest_instantiation(test_code: List[str], cls_name: str, ctx: Sampl
         _emit_unittest_skipped(test_code, f"{cls_name}_instantiation", cls_name, skip or "")
         return
     test_code.append(f"    def test_{cls_name}_instantiation(self):")
-    test_code.append(f'        """Instanciación básica de {cls_name}."""')
+    test_code.append(f'        """Basic instantiation of {cls_name}."""')
     if construction_assumed(cls_name, ctx):
         test_code.extend([
             "        try:",
             f"            obj = {expr}",
             f"        except {_MISFIT} as exc:",
-            '            self.skipTest(f"No se pudo crear el objeto con valores supuestos: {exc}")',
+            '            self.skipTest(f"Could not create the object from assumed values: {exc}")',
         ])
     else:
         test_code.append(f"        obj = {expr}")
@@ -581,7 +582,7 @@ def render_unittest_suite(
     visitor: UnitTestGenerator,
     recorded: Dict[str, Outcome],
 ) -> str:
-    """Renderiza el archivo completo de una suite unittest."""
+    """Render the complete source of a unittest suite."""
     ctx = SampleContext(visitor.tree, visitor.project)
     specs = build_targets(visitor, ctx)
     dotted, _ = module_import(source_filepath)
@@ -590,7 +591,7 @@ def render_unittest_suite(
     body = [
         f"class Test{class_name}QA(unittest.TestCase):",
         "    def setUp(self):",
-        '        """Sin red, con la entrada estándar vacía y con un límite de tiempo: ningún test se queda esperando."""',
+        '        """No network, empty standard input and a time limit: no test is left waiting."""',
         '        for target, new in (("socket.socket.connect", _qa_local_connect),',
         '                            ("socket.getaddrinfo", _qa_local_getaddrinfo), ("sys.stdin", _qa_empty_stdin())):',
         "            patcher = patch(target, new)",
@@ -609,7 +610,7 @@ def render_unittest_suite(
             _emit_unittest_instantiation(body, cls_name, ctx)
     if not visitor.functions and not visitor.classes:
         body.append("    def test_module_importable(self):")
-        body.append('        """El módulo se importa correctamente."""')
+        body.append('        """The module imports cleanly."""')
         body.append("        self.assertIsNotNone(True)")
         body.append("")
     body.append("if __name__ == '__main__':")
@@ -628,11 +629,11 @@ def render_unittest_suite(
 
 
 # ---------------------------------------------------------------------------
-# Emisor pytest
+# pytest emitter
 # ---------------------------------------------------------------------------
 
 class _PytestCase(NamedTuple):
-    """Lo que comparten todos los tests pytest de un objetivo: su descripción, su resultado y su E/S."""
+    """What every pytest test of one target shares: its description, its expected outcome and its I/O."""
 
     spec: TargetSpec
     outcome: Optional[Outcome]
@@ -641,17 +642,17 @@ class _PytestCase(NamedTuple):
 
     @property
     def safe_id(self) -> str:
-        """El nombre del objetivo como parte de un identificador de test."""
+        """The target name as used inside a test identifier."""
         return self.spec.name.replace(".", "_")
 
     @property
     def func_node(self) -> Optional[ast.AST]:
-        """El nodo de la función o el método, para analizar su cuerpo."""
+        """The function or method node, for analysing its body."""
         return self.spec.func_node
 
 
 def build_pytest_case(spec: TargetSpec, recorded: Optional[Dict[str, Outcome]]) -> _PytestCase:
-    """Prepara el caso normalizado a partir del cual se emiten las pruebas pytest."""
+    """Prepare the normalised case the pytest tests are emitted from."""
     outcome, source = _spec_outcome(spec, recorded)
     outcome, targets = absorb_blocked(outcome, io_targets(spec.meta.get("io_calls", [])))
     return _PytestCase(spec, outcome, source, targets)
@@ -673,11 +674,11 @@ def _fallback_assertion_line(spec: TargetSpec) -> str:
         return "assert result is None"
     if kind == "not_none":
         return "assert result is not None"
-    return "_ = result  # sin aserción de valor: solo se comprueba que no hay excepción"
+    return "_ = result  # no value assertion: this only checks that no exception is raised"
 
 
 def _nominal_assertion(case: _PytestCase) -> List[str]:
-    """Comentario y aserción del caso nominal, de la fuente más fiable disponible."""
+    """Comment and assertion for the nominal case, from the most reliable source available."""
     outcome = case.outcome
     if outcome is not None and outcome[0] == "value":
         return [f"# Assert: {SOURCE_COMMENT[case.source]}", _value_assertion(outcome[1])]
@@ -686,14 +687,14 @@ def _nominal_assertion(case: _PytestCase) -> List[str]:
     if case.io_targets:
         expected = io_assertion(case.spec)
         if expected == "called":
-            return ["# Assert: la función delega en la E/S sustituida", f"assert {io_called_expr(case.io_targets)}"]
+            return ["# Assert: the function delegates to the patched I/O", f"assert {io_called_expr(case.io_targets)}"]
         if expected == "none":
-            return ["# Assert: la función no devuelve nada", "assert result is None"]
-        return ["# Assert: con la E/S sustituida el valor depende de los dobles; basta con que no falle", "_ = result"]
+            return ["# Assert: the function returns nothing", "assert result is None"]
+        return ["# Assert: with the I/O patched the value depends on the doubles; not failing is enough", "_ = result"]
     if case.spec.access == "property":
-        return ["# Assert: la propiedad se puede leer (fija su valor a mano o usa --record)", "_ = result"]
+        return ["# Assert: the property can be read (pin its value by hand or use --record)", "_ = result"]
     return [
-        "# Assert: solo lo verificable sin conocer el valor (fíjalo a mano o usa --record)",
+        "# Assert: only what can be checked without knowing the value (pin it by hand or use --record)",
         _fallback_assertion_line(case.spec),
     ]
 
@@ -707,29 +708,29 @@ def _emit_pytest_skipped(lines: List[str], name: str, reason: str) -> None:
 
 
 def _emit_pytest_nominal(lines: List[str], case: _PytestCase) -> None:
-    """Caso nominal: el valor esperado se calcula del cuerpo o se graba; nunca se adivina por el nombre."""
+    """Nominal case: the expected value is computed from the body or recorded; it is never guessed from the name."""
     spec = case.spec
     raises_outcome = case.outcome is not None and case.outcome[0] == "raises"
     test_name = f"test_{case.safe_id}_sample_input_raises" if raises_outcome else f"test_{case.safe_id}_happy_path"
     lines.append(f"def {test_name}(qa_workspace) -> None:")
-    lines.append("    # Arrange: inicializar entorno aislado y argumentos nominales de entrada")
+    lines.append("    # Arrange: isolated environment and nominal input arguments")
     lines.extend(_setup_lines(spec, "    ", "pytest.skip"))
     lines.append("    _ = qa_workspace")
     ind = "    "
-    # Si se comprueba que delega en los dobles, el valor no se mira: sin result = no queda una
-    # variable sin usar (F841) en la suite.
+    # When the test checks delegation to the doubles, the value is not inspected: dropping the
+    # `result =` avoids leaving an unused variable (F841) in the suite.
     named = bool(case.io_targets) and case.outcome is None and io_assertion(spec) == "called"
     if case.io_targets:
-        lines.append(f"    # E/S sustituida por dobles: {', '.join(case.io_targets)}")
+        lines.append(f"    # I/O replaced by test doubles: {', '.join(case.io_targets)}")
         lines.append(f"    with {patch_clause(case.io_targets, named=named)}:")
         ind = "        "
     if raises_outcome and case.outcome is not None:
-        lines.append(f"{ind}# Act y Assert: {RAISES_COMMENT[case.source]}")
+        lines.append(f"{ind}# Act and Assert: {RAISES_COMMENT[case.source]}")
         match = _regex_literal(case.outcome[2]) if case.outcome[2] else 'r".*"'
         lines.append(f"{ind}with pytest.raises({case.outcome[1]}, match={match}):")
         lines.append(f"{ind}    {spec.call()}")
     else:
-        lines.append(f"{ind}# Act: invocar la función objetivo con valores válidos")
+        lines.append(f"{ind}# Act: call the target with valid values")
         fake_io = bool(case.io_targets) and case.outcome is None
         statement = spec.call() if named else f"result = {spec.call()}"
         lines.extend(_call_lines(spec, ind, statement, "pytest.skip", fake_io))
@@ -739,12 +740,12 @@ def _emit_pytest_nominal(lines: List[str], case: _PytestCase) -> None:
 
 def _boundary_body(case: _PytestCase, call: str, first_assumed: bool) -> List[str]:
     """
-    Con un valor límite la función puede devolver algo o rechazarlo con una de las excepciones
-    previstas: también un assert de validación, o un OSError cuando el valor es una ruta ("" no
-    existe; 2.048 caracteres son un nombre demasiado largo). Solo se afirma sobre el valor lo que es seguro:
-    None si nunca devuelve nada y not None si siempre termina devolviendo un valor. Si puede
-    devolver None por algún camino, o si su E/S está sustituida, no se afirma nada sobre el valor:
-    basta con que no lance otra excepción.
+    Given a boundary value, the function may return something or reject it with one of the
+    expected exceptions: a validating assert counts too, and so does an OSError when the value is
+    a path ("" does not exist; 2,048 characters is too long a name). Only what is certain is
+    asserted about the value: None when it never returns anything, and not None when it always
+    ends by returning a value. When it can return None on some path, or its I/O is patched,
+    nothing is asserted about the value: raising no other exception is enough.
     """
     raises = declared_raises(case.spec, reachable=True)
     exc_tuple = ", ".join(sorted({name for name, _ in raises}
@@ -753,14 +754,14 @@ def _boundary_body(case: _PytestCase, call: str, first_assumed: bool) -> List[st
     kind = fallback_kind(case.spec)[0]
     assign = ""
     if case.io_targets:
-        value_check = ["    # La E/S está sustituida: el valor depende de los dobles y no se afirma."]
+        value_check = ["    # The I/O is patched: the value depends on the doubles and is not asserted."]
     elif kind == "none":
-        value_check = ["    # Puede devolver None por algún camino: no se afirma nada sobre el valor."]
+        value_check = ["    # It can return None on some path: nothing is asserted about the value."]
     else:
         assign = "res = "
         value_check = ["    assert res is None" if kind == "is_none" else "    assert res is not None"]
-    # Un rechazo tiene que explicar el motivo, salvo las excepciones que la función lanza sin
-    # mensaje (raise KeyError(), o un assert sin texto), cuyo texto es vacío.
+    # A rejection must explain itself, except for exceptions the function raises without a
+    # message (raise KeyError(), or an assert with no text), whose text is empty.
     silent = sorted({name for name, msg in raises if msg == ""}
                     | ({"AssertionError"} if case.spec.meta.get("bare_assert") else set()))
     message_check = f"    assert str(exc) or isinstance(exc, ({', '.join(silent)},))" if silent else "    assert str(exc)"
@@ -768,20 +769,20 @@ def _boundary_body(case: _PytestCase, call: str, first_assumed: bool) -> List[st
     if first_assumed:
         body.extend([
             "except AttributeError as exc:",
-            '    pytest.skip(f"El valor límite no es del tipo que espera la función: {exc}")',
+            '    pytest.skip(f"The boundary value is not of the type the function expects: {exc}")',
         ])
     return body
 
 
 def _emit_pytest_boundary(lines: List[str], case: _PytestCase) -> None:
-    """Valores frontera parametrizados del primer parámetro, según su clase de valor."""
+    """Parametrised boundary values for the first parameter, by its value kind."""
     spec = case.spec
     if spec.access == "property" or spec.plan.first is None:
         return
     param, sample = spec.plan.first
     values = boundary_values(sample, param.arg)
     if param.arg in spec.meta.get("durations", []):
-        # Una duración de 10**6 segundos dejaría el test esperando once días.
+        # A duration of 10**6 seconds would leave the test waiting for eleven days.
         values = [(b_id, value) for b_id, value in values if b_id != "large_num"]
     if not values:
         return
@@ -789,11 +790,11 @@ def _emit_pytest_boundary(lines: List[str], case: _PytestCase) -> None:
     row_ids = ", ".join(f'"{b_id}"' for b_id, _ in values)
     lines.append(f'@pytest.mark.parametrize("boundary_value", [{rows}], ids=[{row_ids}])')
     lines.append(f"def test_{case.safe_id}_boundary_values(boundary_value) -> None:")
-    lines.append(f"    # Arrange: asignar a {param.arg} los valores frontera provistos por pytest")
+    lines.append(f"    # Arrange: {param.arg} takes each boundary value supplied by pytest")
     lines.extend(_setup_lines(spec, "    ", "pytest.skip"))
-    lines.append("    # Act y Assert: comprobar respuesta coherente o rechazo tipado con detalle")
+    lines.append("    # Act and Assert: a coherent result, or a typed rejection that explains itself")
     call = spec.call(spec.plan.with_first("boundary_value"))
-    # Los elementos de una lista o un dict sin tipo conocido son una suposición, como su valor.
+    # Elements of a list or dict with no known type are an assumption, just like its value.
     guessed = sample.assumed or param.arg in spec.plan.assumed or (sample.kind in ("list", "dict") and sample.item is None)
     body = _boundary_body(case, call, guessed)
     if case.io_targets:
@@ -805,7 +806,7 @@ def _emit_pytest_boundary(lines: List[str], case: _PytestCase) -> None:
 
 
 def _emit_pytest_adversarial(lines: List[str], case: _PytestCase) -> None:
-    """Escenarios hostiles: tipo de excepción exacto y mensaje con match, o None en el primer parámetro."""
+    """Hostile scenarios: the exact exception type with a matching message, or None for the first parameter."""
     spec = case.spec
     if spec.access == "property" or spec.plan.first is None:
         return
@@ -813,9 +814,9 @@ def _emit_pytest_adversarial(lines: List[str], case: _PytestCase) -> None:
     if rejection is not None:
         match_kw = f", match={rejection.pattern}" if rejection.pattern else ""
         lines.append(f"def test_{case.safe_id}_adversarial_raises_exact_error() -> None:")
-        lines.append("    # Arrange: preparar argumento hostil que dispara la validación de dominio")
+        lines.append("    # Arrange: a hostile argument that triggers the domain validation")
         lines.extend(_setup_lines(spec, "    ", "pytest.skip"))
-        lines.append("    # Act y Assert: exigir tipo exacto y mensaje esperado en pytest.raises")
+        lines.append("    # Act and Assert: require the exact type and expected message in pytest.raises")
         lines.append(f"    with {_with_doubles(case.io_targets)}pytest.raises({rejection.exceptions}{match_kw}):")
         lines.append(f"        {spec.call(_with_arg(spec.plan, rejection.position, rejection.value))}")
         lines.append("")
@@ -824,29 +825,29 @@ def _emit_pytest_adversarial(lines: List[str], case: _PytestCase) -> None:
     if param.arg not in spec.meta.get("none_unsafe", []) or accepts_none(param, None):
         return
     lines.append(f"def test_{case.safe_id}_adversarial_none_input() -> None:")
-    lines.append(f"    # Arrange: sustituir {param.arg} por None (el cuerpo lo usa sin comprobarlo)")
+    lines.append(f"    # Arrange: replace {param.arg} with None (the body uses it without checking)")
     lines.extend(_setup_lines(spec, "    ", "pytest.skip"))
-    lines.append("    # Act y Assert: exigir excepción explícita ante referencia nula")
+    lines.append("    # Act and Assert: require an explicit exception for the null reference")
     exceptions = ", ".join(_none_input_exceptions(case))
     lines.append(f"    with {_with_doubles(case.io_targets)}pytest.raises(({exceptions}), match={_none_input_match(case)}):")
     lines.append(f"        {spec.call(spec.plan.with_first('None'))}")
     lines.append("")
 
 
-# Lo que suele lanzar Python al operar con None donde se esperaba un valor, y el assert con el que
-# una función valida su entrada.
+# What Python usually raises when it operates on None where a value was expected, plus the
+# AssertionError of a function that validates its input with assert.
 _NONE_INPUT_EXCEPTIONS = ("TypeError", "ValueError", "AttributeError", "KeyError", "ZeroDivisionError",
                           "AssertionError")
 
 
 def _none_input_exceptions(case: _PytestCase) -> List[str]:
-    """Las excepciones que la función lanza de forma explícita y, después, las que lanza Python con None."""
+    """The exceptions the function raises explicitly, followed by those Python raises when given None."""
     declared = sorted({name for name, _ in declared_raises(case.spec, reachable=True)} - set(_NONE_INPUT_EXCEPTIONS))
     return [*declared, *_NONE_INPUT_EXCEPTIONS]
 
 
 def _none_input_match(case: _PytestCase) -> str:
-    """Se exige un mensaje, salvo si la función lanza alguna excepción sin él (raise KeyError(), assert x)."""
+    """A message is required, unless the function raises some exception without one (raise KeyError(), assert x)."""
     silent = any(msg == "" for _, msg in case.spec.meta.get("raises_reachable") or case.spec.meta.get("raises") or [])
     return 'r".*"' if silent or case.spec.meta.get("bare_assert") else 'r".+"'
 
@@ -857,47 +858,47 @@ def _emit_pytest_property(lines: List[str], case: _PytestCase) -> None:
         "if _HAS_HYPOTHESIS:",
         "    @given(st.integers(min_value=-10000, max_value=10000), st.integers(min_value=-10000, max_value=10000))",
         f"    def test_{case.safe_id}_property_integers(x_val: int, y_val: int) -> None:",
-        "        # Arrange & Act: evaluar invariante sobre enteros generados aleatoriamente",
+        "        # Arrange & Act: check the invariant on randomly generated integers",
         *_setup_lines(spec, "        ", "pytest.skip"),
         f"        res = {spec.call('x_val, y_val')}",
-        "        # Assert: el resultado sigue siendo numérico (int o float)",
+        "        # Assert: the result is still numeric (int or float)",
         "        assert isinstance(res, (int, float))",
         "",
     ])
 
 
 def _emit_pytest_async(lines: List[str], case: _PytestCase) -> None:
-    """Corrutinas: agotamiento de tiempo, cancelación cooperativa y ejecución concurrente."""
+    """Coroutines: timeouts, cooperative cancellation and concurrent execution."""
     spec = case.spec
     target, args = spec.call_target, spec.plan.arg_str
-    setup = _setup_lines(spec, "    ", "pytest.skip") or ["    # Función a nivel de módulo: no requiere instanciación previa."]
+    setup = _setup_lines(spec, "    ", "pytest.skip") or ["    # Module-level function: nothing to instantiate first."]
     gather = [f"        batch = await asyncio.gather({target}({args}), {target}({args}))"]
     if spec.plan.assumed:
         gather = [
             "        try:",
             f"            batch = await asyncio.gather({target}({args}), {target}({args}))",
             f"        except {_MISFIT} as exc:",
-            '            pytest.skip(f"Los valores supuestos no encajan con la función: {exc}")',
+            '            pytest.skip(f"The assumed values do not fit the function: {exc}")',
         ]
     lines.extend([
         f"def test_{case.safe_id}_async_timeout_cancellation_and_gather() -> None:",
-        "    # Arrange: definir estado inicial para las pruebas del ciclo de vida asyncio",
+        "    # Arrange: initial state for the asyncio lifecycle tests",
         *setup,
         "    async def _slow_op(*_args, **_kwargs):",
         "        await asyncio.sleep(0.2)",
         f"        return await {target}({args})",
         "    async def _run_checks() -> None:",
-        "        # Act y Assert: validar expiración de timeout mediante wait_for",
+        "        # Act and Assert: the timeout expires through wait_for",
         "        with pytest.raises((TimeoutError, asyncio.TimeoutError)):",
         "            await asyncio.wait_for(_slow_op(), timeout=0.001)",
-        "        # Act y Assert: validar propagación limpia de asyncio.CancelledError",
+        "        # Act and Assert: asyncio.CancelledError propagates cleanly",
         f"        task = asyncio.create_task({target}({args}))",
         "        task.cancel()",
         "        try:",
         "            await task",
         "        except asyncio.CancelledError:",
         "            assert task.cancelled()",
-        "        # Act y Assert: comprobar ejecución concurrente con asyncio.gather",
+        "        # Act and Assert: concurrent execution with asyncio.gather",
         *gather,
         "        assert len(batch) == 2",
         *([f"    with {patch_clause(case.io_targets)}:", "        asyncio.run(_run_checks())"] if case.io_targets
@@ -908,39 +909,39 @@ def _emit_pytest_async(lines: List[str], case: _PytestCase) -> None:
 
 def _emit_pytest_io_fault(lines: List[str], case: _PytestCase) -> None:
     """
-    E/S que falla: todas las llamadas con efectos se sustituyen y lanzan OSError. Si quedara
-    alguna sin sustituir, el test la ejecutaría de verdad (un rmtree real, por ejemplo).
+    Failing I/O: every call with side effects is patched to raise OSError. Any call left unpatched
+    would really run in the test (a real rmtree, for instance).
     """
     spec = case.spec
     faulty = ", ".join(
         f'patch("{t}", autospec=True, side_effect=OSError("io_fault")) as io_{i}'
         for i, t in enumerate(case.io_targets)
-    )  # nombrados: el test comprueba si la función llegó a usarlos
+    )  # named, so the test can check whether the function reached them
     misfit = []
     if spec.plan.assumed:
         misfit = [
             f"        except {_MISFIT} as exc:",
-            '            pytest.skip(f"Los valores supuestos no encajan con la función: {exc}")',
+            '            pytest.skip(f"The assumed values do not fit the function: {exc}")',
         ]
     lines.extend([
         f"def test_{case.safe_id}_isolated_io_fault() -> None:",
-        "    # Arrange: dobles con autospec que simulan la indisponibilidad de la E/S",
-        *(_setup_lines(spec, "    ", "pytest.skip") or ["    # Función a nivel de módulo: no requiere instanciación previa."]),
+        "    # Arrange: autospec doubles that simulate the I/O being unavailable",
+        *(_setup_lines(spec, "    ", "pytest.skip") or ["    # Module-level function: nothing to instantiate first."]),
         f"    with {faulty}:",
-        "        # Act y Assert: la función gestiona el fallo o lo propaga con un error tipado y descriptivo",
+        "        # Act and Assert: the function handles the failure or propagates it as a typed, descriptive error",
         "        try:",
         f"            {spec.call()}",
         "        except (OSError, RuntimeError, ValueError) as exc:",
         "            assert str(exc)",
         *misfit,
         f"        if not ({io_called_expr(case.io_targets)}):",
-        '            pytest.skip("Con los valores de ejemplo la función no llega a la E/S sustituida.")',
+        '            pytest.skip("With the sample values the function never reaches the patched I/O.")',
         "",
     ])
 
 
 def emit_pytest_function(lines: List[str], spec: TargetSpec, recorded: Optional[Dict[str, Outcome]] = None) -> None:
-    """Emite todos los tests pytest (nominal, frontera, adversario, propiedades, async y E/S)."""
+    """Emit every pytest test for a target (nominal, boundary, adversarial, properties, async and I/O)."""
     if spec.skip:
         _emit_pytest_skipped(lines, spec.name.replace(".", "_"), spec.skip)
         return
@@ -971,7 +972,7 @@ def _emit_pytest_instantiation(lines: List[str], cls_name: str, ctx: SampleConte
             "    try:",
             f"        obj = {expr}",
             f"    except {_MISFIT} as exc:",
-            '        pytest.skip(f"No se pudo crear el objeto con valores supuestos: {exc}")',
+            '        pytest.skip(f"Could not create the object from assumed values: {exc}")',
         ]
     lines.extend([
         f"def test_{cls_name}_instantiation(qa_workspace) -> None:",
@@ -991,14 +992,14 @@ def render_pytest_suite(
     visitor: UnitTestGenerator,
     recorded: Dict[str, Outcome],
 ) -> str:
-    """Renderiza el archivo completo de una suite pytest adversaria."""
+    """Render the complete source of an adversarial pytest suite."""
     ctx = SampleContext(visitor.tree, visitor.project)
     specs = build_targets(visitor, ctx)
     dotted, _ = module_import(source_filepath)
     body: List[str] = [
         "@pytest.fixture(autouse=True)",
         "def _qa_isolation(monkeypatch):",
-        '    """Sin red, con la entrada estándar vacía y con un límite de tiempo: ningún test se queda esperando."""',
+        '    """No network, empty standard input and a time limit: no test is left waiting."""',
         '    monkeypatch.setattr(socket.socket, "connect", _qa_local_connect)',
         '    monkeypatch.setattr(socket, "getaddrinfo", _qa_local_getaddrinfo)',
         '    monkeypatch.setattr(sys, "stdin", _qa_empty_stdin())',
@@ -1009,12 +1010,12 @@ def render_pytest_suite(
         "",
         "@pytest.fixture",
         "def qa_workspace(tmp_path, monkeypatch):",
-        '    """Fixture modular con setup/teardown (yield) y aislamiento de entorno."""',
+        '    """Module fixture with setup/teardown (yield) and environment isolation."""',
         '    monkeypatch.setenv("QA_TEST_MODE", "1")',
         "    sandbox = tmp_path / 'qa_sandbox'",
         "    sandbox.mkdir(exist_ok=True)",
         "    yield {'sandbox': sandbox, 'monkeypatch': monkeypatch}",
-        "    _ = (MagicMock, AsyncMock)  # Referencia disponible para extensibilidad segura con spec",
+        "    _ = (MagicMock, AsyncMock)  # Kept referenced so hand-written tests can add spec'd doubles",
         "",
         "",
     ]
@@ -1044,7 +1045,7 @@ def render_pytest_suite(
         "",
     ] if "_HAS_HYPOTHESIS" in text else []
     header = [
-        f'"""Suite de pruebas pytest adversaria generada para {dotted}."""',
+        f'"""Adversarial pytest suite generated for {dotted}."""',
         *(["import asyncio"] if "asyncio." in text else []),
         "import io",
         "import signal",
@@ -1068,7 +1069,7 @@ def render_pytest_suite(
 
 
 def write_suite(source_filepath: str, output_test_filepath: str, *, framework: str, record: bool) -> str:
-    """Visita la fuente y escribe la suite unittest o pytest en output_test_filepath."""
+    """Analyse the source and write the unittest or pytest suite to output_test_filepath."""
     from .ast_inspector import read_and_parse
     from .expected_values import record_outcomes
 

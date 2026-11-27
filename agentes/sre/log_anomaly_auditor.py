@@ -5,26 +5,28 @@ from typing import List, Tuple
 
 class LogAnomalyAuditor:
     """
-    Auditor SRE de anomalías e incidentes en archivos de registro (*Log Anomaly Auditor*).
-    Detecta ráfagas de excepciones, errores 5xx, fallos de autenticación y fugas de memoria.
+    Scans log files for incidents: uncaught exceptions, 5xx responses, authentication failures,
+    memory exhaustion and connectivity errors. Each line is reported at most once, for the
+    first pattern it matches.
     """
 
     ANOMALY_PATTERNS = [
-        (r"(?i)Traceback \(most recent call last\)", "CRITICO", "Ráfaga de excepciones no capturadas (Stack Traceback)."),
-        (r"HTTP/\d\.\d\"?\s+5\d\d", "ALTO", "Spike de errores internos del servidor (HTTP 5xx)."),
-        (r"(?i)(OutOfMemoryError|MemoryError|Out of memory)", "CRITICO", "Aviso de agotamiento de memoria del sistema (OOM)."),
-        (r"(?i)(Authentication failed|Invalid password|Failed login)", "MEDIO", "Intento fallido de autenticación o posible fuerza bruta."),
-        (r"(?i)(ConnectionRefusedError|DatabaseConnectionError|TimeoutError)", "ALTO", "Fallo de conectividad o tiempo de espera en base de datos/servicio externo.")
+        (r"(?i)Traceback \(most recent call last\)", "CRITICAL", "Uncaught exception (Traceback)."),
+        (r"HTTP/\d\.\d\"?\s+5\d\d", "HIGH", "Internal server error response (HTTP 5xx)."),
+        (r"(?i)(OutOfMemoryError|MemoryError|Out of memory)", "CRITICAL", "System memory exhausted (OOM)."),
+        (r"(?i)(Authentication failed|Invalid password|Failed login)", "MEDIUM", "Failed authentication attempt or possible brute force."),
+        (r"(?i)(ConnectionRefusedError|DatabaseConnectionError|TimeoutError)", "HIGH", "Connectivity failure or timeout reaching a database or external service.")
     ]
 
     @staticmethod
     def audit_log_file(filepath: str) -> List[Tuple[int, str, str, str]]:
         """
-        Audita un archivo de log y retorna una lista de hallazgos (Línea, Severidad, Patrón, Fragmento).
+        Audit a log file. Returns (line, severity, description, snippet) tuples; snippets are
+        truncated to 80 characters.
         """
         findings = []
         if not os.path.exists(filepath):
-            return [(0, "ERROR", "N/A", f"Archivo de log '{filepath}' no encontrado.")]
+            return [(0, "ERROR", "N/A", f"Log file '{filepath}' not found.")]
 
         try:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
@@ -39,6 +41,6 @@ class LogAnomalyAuditor:
                             findings.append((line_num, severity, description, masked_snippet))
                             break
         except Exception as e:
-            findings.append((0, "ERROR", "N/A", f"Error al procesar archivo de log: {str(e)}"))
+            findings.append((0, "ERROR", "N/A", f"Could not process the log file: {str(e)}"))
 
         return findings

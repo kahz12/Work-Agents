@@ -1,5 +1,5 @@
 """
-Valores de ejemplo, casos límite y matriz de escenarios para generación de tests.
+Sample values, boundary cases and the scenario matrix used to generate tests.
 """
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .ast_inspector import UnitTestGenerator, read_and_parse
 
+# Sample argument values (as source literals) keyed by parameter name. Spanish names are listed
+# next to their English equivalents because the generator is also run on Spanish codebases.
 SAMPLE_BY_NAME: Dict[str, str] = dict((
     ("a", "2"),
     ("b", "3"),
@@ -26,9 +28,9 @@ SAMPLE_BY_NAME: Dict[str, str] = dict((
     ("user", '"admin"'),
     ("username", '"admin"'),
     ("password", '"Secret1!"'),
-    ("text", '"hola"'),
-    ("msg", '"hola"'),
-    ("message", '"hola"'),
+    ("text", '"hello"'),
+    ("msg", '"hello"'),
+    ("message", '"hello"'),
     ("path", '"/tmp/test.txt"'),
     ("filename", '"report.pdf"'),
     ("url", '"https://example.com"'),
@@ -39,10 +41,11 @@ SAMPLE_BY_NAME: Dict[str, str] = dict((
     ("offset", "0"),
 ))
 
+# A hostile value per parameter name, for the "invalid input" scenarios.
 INVALID_BY_NAME: Dict[str, str] = {
     "porcentaje": "-1",
     "percent": "-1",
-    "email": '"no-es-email"',
+    "email": '"not-an-email"',
     "path": '"../../etc/passwd"',
 }
 
@@ -66,7 +69,7 @@ _CONTAINER_SAMPLES: Dict[str, str] = {
 
 
 def annotation_sample(annotation: Optional[ast.AST]) -> Optional[str]:
-    """Deduce un literal de muestra a partir de una anotación de tipo AST."""
+    """A sample literal inferred from a type annotation, or None when the type is not recognised."""
     if annotation is None:
         return None
     if isinstance(annotation, ast.Name):
@@ -89,7 +92,7 @@ def annotation_sample(annotation: Optional[ast.AST]) -> Optional[str]:
 
 
 def sample_for_arg(arg_name: str) -> str:
-    """Devuelve un valor de muestra heurístico según el nombre del parámetro."""
+    """A heuristic sample value based on the parameter name alone."""
     key = arg_name.lower()
     if key in SAMPLE_BY_NAME:
         return SAMPLE_BY_NAME[key]
@@ -103,7 +106,7 @@ def sample_for_arg(arg_name: str) -> str:
 
 
 def sample_for_arg_node(arg: ast.arg, default_node: Optional[ast.AST] = None) -> str:
-    """Elige un valor de ejemplo priorizando nombre conocido, valor por defecto y tipo."""
+    """A sample value for a parameter: known name first, then its default value, then its annotation."""
     key = arg.arg.lower()
     if key in SAMPLE_BY_NAME:
         return SAMPLE_BY_NAME[key]
@@ -116,7 +119,7 @@ def sample_for_arg_node(arg: ast.arg, default_node: Optional[ast.AST] = None) ->
 
 
 def samples_from_arginfo(arginfo: Optional[ast.arguments], arg_names: List[str]) -> Tuple[List[str], List[str]]:
-    """Extrae (muestras, nombres_de_parametros) omitiendo self y cls."""
+    """(sample values, parameter names) for a signature, skipping self and cls."""
     if arginfo is None:
         return [sample_for_arg(a) for a in arg_names], arg_names
     all_args = arginfo.args
@@ -134,7 +137,7 @@ def samples_from_arginfo(arginfo: Optional[ast.arguments], arg_names: List[str])
 
 
 def boundary_samples_for_param(arg_name: str, ann: Optional[str], nominal: str) -> List[Tuple[str, str]]:
-    """Genera casos límite representativos según tipo o nombre de parámetro."""
+    """Representative boundary cases for a parameter, by type or by name."""
     key = arg_name.lower()
     t = (ann or "").lower()
     if t == "str" or nominal.startswith(('"', "'")):
@@ -153,7 +156,7 @@ def boundary_samples_for_param(arg_name: str, ann: Optional[str], nominal: str) 
         return [
             ("empty_dict", "{}"),
             ("single_kv", '{"k": 1}'),
-            ("unicode_kv", '{"clave_ñ": None}'),
+            ("unicode_kv", '{"key_ñ": None}'),
         ]
     if key in ("porcentaje", "percent", "descuento"):
         return [
@@ -169,7 +172,7 @@ def boundary_samples_for_param(arg_name: str, ann: Optional[str], nominal: str) 
 
 
 def first_invalid_argument(kept_args: List[str]) -> Optional[Tuple[int, str]]:
-    """Posición y valor inválido del primer parámetro con un valor hostil conocido (INVALID_BY_NAME)."""
+    """(index, invalid value) of the first parameter that has a known hostile value (INVALID_BY_NAME)."""
     for i, a in enumerate(kept_args):
         if a.lower() in INVALID_BY_NAME:
             return i, INVALID_BY_NAME[a.lower()]
@@ -188,15 +191,15 @@ def _boundary_scenarios(
                 "target": target,
                 "category": "[BOUNDARY / EDGE CASE]",
                 "scenario": "idempotent_repeated_calls",
-                "input_summary": "llamadas consecutivas sin argumentos",
-                "expected": "Salida consistente y sin fuga de estado compartido.",
+                "input_summary": "consecutive calls without arguments",
+                "expected": "Consistent output and no leaked shared state.",
             },
             {
                 "target": target,
                 "category": "[BOUNDARY / EDGE CASE]",
                 "scenario": "unexpected_extra_arg",
                 "input_summary": "*extra_args",
-                "expected": "Lanza TypeError si la firma no acepta argumentos adicionales.",
+                "expected": "Raises TypeError when the signature accepts no extra arguments.",
             },
         ]
 
@@ -210,7 +213,7 @@ def _boundary_scenarios(
             "category": "[BOUNDARY / EDGE CASE]",
             "scenario": f"boundary_{b_id}",
             "input_summary": ", ".join(f"{k}={v}" for k, v in zip(kept_args, b_vals)),
-            "expected": "Maneja frontera extrema (0, -1, vacío o Unicode) sin fallo silencioso.",
+            "expected": "Handles the extreme boundary (0, -1, empty or Unicode) without failing silently.",
         })
     last_idx = len(kept_args) - 1
     if samples[last_idx] not in ('""', "[]", "{}", "set()", "()", "True"):
@@ -221,7 +224,7 @@ def _boundary_scenarios(
             "category": "[BOUNDARY / EDGE CASE]",
             "scenario": "boundary_extreme_nan_or_inf",
             "input_summary": ", ".join(f"{k}={v}" for k, v in zip(kept_args, ext_vals)),
-            "expected": "Rechaza float('nan')/inf o responde de forma determinista.",
+            "expected": "Rejects float('nan')/inf or responds deterministically.",
         })
     return scenarios
 
@@ -233,11 +236,11 @@ def _adversarial_scenario(
     raises: List[Tuple[str, Optional[str]]],
 ) -> Dict[str, str]:
     exc_desc = (
-        f"Lanza {raises[0][0]} (match={raises[0][1]!r})"
+        f"Raises {raises[0][0]} (match={raises[0][1]!r})"
         if raises and raises[0][1]
-        else (f"Lanza {raises[0][0]}" if raises else "Falla controlada con TypeError/ValueError")
+        else (f"Raises {raises[0][0]}" if raises else "Fails in a controlled way with TypeError/ValueError")
     )
-    inv_summary = "None / payload hostil o fuera de rango"
+    inv_summary = "None / hostile or out-of-range payload"
     invalid = first_invalid_argument(kept_args)
     if invalid is not None:
         i, invalid_val = invalid
@@ -255,16 +258,16 @@ def _adversarial_scenario(
 
 def _fault_scenario(target: str, is_async: bool, io_calls: List[str]) -> Dict[str, str]:
     fault_desc = (
-        "TimeoutError, asyncio.CancelledError y asyncio.gather paralelo"
+        "TimeoutError, asyncio.CancelledError and parallel asyncio.gather"
         if is_async
-        else f"Mock autospec=True sobre {', '.join(io_calls)} simulando OSError/TimeoutError"
+        else f"autospec=True mock of {', '.join(io_calls)} simulating OSError/TimeoutError"
     )
     return {
         "target": target,
         "category": "[CONCURRENCY / I/O FAULT]",
         "scenario": "async_timeout_or_io_isolation" if is_async else "isolated_io_fault",
         "input_summary": fault_desc,
-        "expected": "Sin I/O real; propaga fallo esperado tras cleanup.",
+        "expected": "No real I/O; the expected failure propagates after cleanup.",
     }
 
 
@@ -280,13 +283,13 @@ def _scenarios_for_target(
     io_calls: List[str] = meta.get("io_calls", [])
     param_types: Dict[str, Optional[str]] = meta.get("param_types", {})
 
-    nominal_repr = ", ".join(f"{k}={v}" for k, v in zip(kept_args, samples)) or "sin argumentos"
+    nominal_repr = ", ".join(f"{k}={v}" for k, v in zip(kept_args, samples)) or "no arguments"
     scenarios = [{
         "target": target,
         "category": "[HAPPY PATH]",
         "scenario": "nominal_valid",
         "input_summary": nominal_repr,
-        "expected": "Ejecuta sin excepción y satisface contrato exacto de salida.",
+        "expected": "Runs without raising and returns exactly the contracted output.",
     }]
     scenarios.extend(_boundary_scenarios(target, kept_args, samples, param_types))
     scenarios.append(_adversarial_scenario(target, kept_args, samples, raises))
@@ -297,8 +300,8 @@ def _scenarios_for_target(
 
 def build_scenario_matrix(source_filepath: str) -> List[Dict[str, str]]:
     """
-    Construye la matriz estructurada de escenarios de prueba garantizando al menos
-    tres casos frontera, hostiles o de concurrencia por cada ruta nominal.
+    Build the structured matrix of test scenarios, with at least three boundary, hostile or
+    concurrency cases for every nominal path.
     """
     try:
         tree = read_and_parse(source_filepath)

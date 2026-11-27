@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CLI unificado del ecosistema AGENTES.
+The `agentes` command-line interface.
 
-Ejecuta `agentes` sin argumentos para ver todos los comandos, agrupados por tarea.
-Códigos de salida: 0 correcto, 1 hay hallazgos o fallos, 2 error de uso.
+Run `agentes` without arguments to see every command, grouped by task.
+Exit codes: 0 success, 1 findings or failures, 2 usage error.
 """
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def _resolve_help_argv(argv: List[str], known: List[str]) -> Tuple[Optional[List
         print_overview()
         return None, 0
     if topic not in known:
-        ui.error(f"No hay ayuda para '{topic}'.", "Ejecuta 'agentes' para ver todos los comandos.")
+        ui.error(f"No help available for '{topic}'.", "Run 'agentes' to see every command.")
         return None, 2
     return [topic, "-h"], None
 
@@ -108,14 +108,14 @@ def _execute_command(args: argparse.Namespace) -> int:
         ui.error(exc.message, exc.hint)
         return 2
     except KeyboardInterrupt:
-        print("\nInterrumpido.", file=sys.stderr)
+        print("\nInterrupted.", file=sys.stderr)
         return 130
     except BrokenPipeError:
         return 0
-    except Exception as exc:  # noqa: BLE001 - último recurso: mensaje legible en vez de traza
+    except Exception as exc:  # noqa: BLE001 - last resort: a readable message instead of a traceback
         if os.environ.get("AGENTES_DEBUG"):
             raise
-        ui.error(f"Error inesperado: {exc}", "Para ver la traza completa, repite el comando con AGENTES_DEBUG=1.")
+        ui.error(f"Unexpected error: {exc}", "To see the full traceback, run the command again with AGENTES_DEBUG=1.")
         return 1
 
 
@@ -125,7 +125,7 @@ def _dispatch(argv: List[str]) -> int:
     if "--offline" in argv:
         os.environ["AGENTES_OFFLINE"] = "1"
 
-    # Atajo: el nombre de un agente solo equivale a su demo (`agentes qa` = `agentes demo qa`).
+    # Shortcut: a bare agent name runs its demo (`agentes qa` is `agentes demo qa`).
     if argv and argv[0] in AGENTS:
         argv = ["demo", *argv]
 
@@ -137,8 +137,8 @@ def _dispatch(argv: List[str]) -> int:
     known = COMMAND_NAMES + list(COMMAND_ALIASES)
     if command is not None and command not in known:
         close = difflib.get_close_matches(command, known + list(AGENTS), n=1)
-        hint = f"¿Querías decir '{close[0]}'? " if close else ""
-        ui.error(f"Comando desconocido: '{command}'.", f"{hint}Ejecuta 'agentes' para ver todos los comandos.")
+        hint = f"Did you mean '{close[0]}'? " if close else ""
+        ui.error(f"Unknown command: '{command}'.", f"{hint}Run 'agentes' to see every command.")
         return 2
 
     if command == "help":
@@ -159,13 +159,17 @@ def _dispatch(argv: List[str]) -> int:
         print_overview()
         return 0
     if args.command == "password" and args.action == "verify" and not args.hash:
-        ui.error("'password verify' necesita el hash a comprobar.", "Ejemplo: agentes password verify 'argon2:$argon2id$...'")
+        ui.error("'password verify' needs the hash to check against.", "Example: agentes password verify 'argon2:$argon2id$...'")
         return 2
     return _execute_command(args)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Punto de entrada principal del CLI unificado de AGENTES."""
+    """
+    CLI entry point. Returns the exit code instead of exiting, so tests and embedding callers
+    can run it in-process; global state it touches (colour, AGENTES_OFFLINE, display root) is
+    restored on the way out.
+    """
     token = reset_display_root()
     had_offline = "AGENTES_OFFLINE" in os.environ
     prev_offline = os.environ.get("AGENTES_OFFLINE")

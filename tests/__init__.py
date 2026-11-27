@@ -1,2 +1,2 @@
-# Hace de tests/ un paquete: pytest importa cada módulo como tests.test_x, así que un
-# test_x.py con el mismo nombre en otra carpeta no choca con estos.
+# Makes tests/ a package: pytest imports each module as tests.test_x, so a test_x.py with the
+# same name in another directory does not clash with these.

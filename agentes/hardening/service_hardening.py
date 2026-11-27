@@ -4,48 +4,48 @@ from typing import List, Tuple
 
 class ServiceHardening:
     """
-    Auditor y generador de unidades de servicio Systemd fortalecidas (*Systemd Service Hardening*).
-    Aplica namespaces de Linux, aislamiento de sistema de archivos y restricciones de privilegios.
+    Audits systemd service units and generates hardened ones, using Linux namespaces,
+    filesystem isolation and privilege restrictions.
     """
 
     SYSTEMD_SERVICE_TEMPLATE = """[Unit]
-Description=Servicio de Aplicación Fortalecido (Hardened Systemd Unit)
+Description=Hardened application service
 After=network.target
 
 [Service]
 Type=simple
 User=appuser
 Group=appgroup
-WorkingDirectory=/opt/mi_aplicacion
-ExecStart=/usr/bin/python3 /opt/mi_aplicacion/main.py
+WorkingDirectory=/opt/my_app
+ExecStart=/usr/bin/python3 /opt/my_app/main.py
 Restart=on-failure
 
 # ---------------------------------------------------------
-# Directivas de Fortalecimiento y Aislamiento de Seguridad
+# Hardening and isolation directives
 # ---------------------------------------------------------
-# Prevenir que el proceso obtenga nuevos privilegios (suid/sgid)
+# The process can never gain new privileges (setuid/setgid binaries)
 NoNewPrivileges=true
 
-# Montar el sistema de archivos del SO como Lectura Únicamente (Read-Only)
+# Mount the whole OS filesystem read-only, except the paths listed below
 ProtectSystem=strict
-ReadWritePaths=/var/log/mi_aplicacion /tmp
+ReadWritePaths=/var/log/my_app /tmp
 
-# Prevenir acceso a los directorios /home, /root y /run/user
+# No access to /home, /root or /run/user
 ProtectHome=true
 
-# Crear espacio de nombres temporal aislado para /tmp
+# Private /tmp namespace for this service
 PrivateTmp=true
 
-# Ocultar dispositivos de hardware (/dev) innecesarios
+# Hide hardware devices under /dev
 PrivateDevices=true
 
-# Bloquear modificaciones a la configuración del Kernel (sysctl)
+# Block changes to kernel tunables (sysctl)
 ProtectKernelTunables=true
 
-# Bloquear carga de módulos del Kernel
+# Block loading kernel modules
 ProtectKernelModules=true
 
-# Limitar las capacidades de Linux permitidas al proceso
+# Empty bounding set: the process holds no Linux capabilities at all
 CapabilityBoundingSet=
 
 [Install]
@@ -55,7 +55,7 @@ WantedBy=multi-user.target
     @staticmethod
     def generate_hardened_service(target_path: str) -> str:
         """
-        Genera un archivo de unidad de servicio systemd fortalecido.
+        Write the hardened unit template to target_path and return the path.
         """
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(ServiceHardening.SYSTEMD_SERVICE_TEMPLATE)
@@ -64,44 +64,48 @@ WantedBy=multi-user.target
     @staticmethod
     def audit_systemd_service(filepath: str) -> List[Tuple[str, str, str]]:
         """
-        Audita un archivo .service de systemd comprobando si contiene directivas de aislamiento.
+        Check a systemd .service file for the essential isolation directives.
+        Returns (directive, level, message) tuples, or a single OK entry.
         """
         findings = []
         if not os.path.exists(filepath):
-            return [("N/A", "ERROR", f"El archivo de servicio '{filepath}' no existe.")]
+            return [("N/A", "ERROR", f"Service file '{filepath}' does not exist.")]
 
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Directivas activas: clave -> valor. Ignora comentarios, porque una directiva
-        # comentada no aplica nada aunque el texto aparezca en el fichero.
-        activas = {}
+        # Active directives: key -> value. Comments are skipped, because a commented-out
+        # directive enforces nothing even though its text is present in the file.
+        active = {}
         for raw in content.splitlines():
-            linea = raw.strip()
-            if not linea or linea.startswith(("#", ";")) or "=" not in linea:
+            line = raw.strip()
+            if not line or line.startswith(("#", ";")) or "=" not in line:
                 continue
-            clave, _, valor = linea.partition("=")
-            activas[clave.strip()] = valor.strip().strip('"').lower()
+            key, _, value = line.partition("=")
+            active[key.strip()] = value.strip().strip('"').lower()
 
-        NEGATIVOS = {"false", "no", "off", "0", ""}
+        # Values systemd treats as "off". An empty assignment resets the directive to its
+        # default, which for these directives means no protection.
+        disabled_values = {"false", "no", "off", "0", ""}
         essential_directives = [
-            ("NoNewPrivileges", "true", "ALTO", "Previene escalada de privilegios SUID."),
-            ("ProtectSystem", None, "MEDIO", "Protege archivos del sistema (/usr, /boot, /etc) contra escritura."),
-            ("ProtectHome", "true", "MEDIO", "Aísla los directorios personales de usuarios."),
-            ("PrivateTmp", "true", "BAJO", "Aísla el directorio de archivos temporales /tmp."),
+            # (directive, required value or None for "any enabling value", level, why it matters)
+            ("NoNewPrivileges", "true", "HIGH", "It prevents privilege escalation through setuid binaries."),
+            ("ProtectSystem", None, "MEDIUM", "It protects system files (/usr, /boot, /etc) against writes."),
+            ("ProtectHome", "true", "MEDIUM", "It isolates users' home directories."),
+            ("PrivateTmp", "true", "LOW", "It isolates the temporary files directory /tmp."),
         ]
 
-        for clave, esperado, level, reason in essential_directives:
-            actual = activas.get(clave)
-            if actual is None:
-                findings.append((clave, level, f"Falta la directiva de aislamiento '{clave}='. {reason}"))
-            elif actual in NEGATIVOS:
-                mostrado = actual or "vacío"
-                findings.append((clave, level, f"'{clave}={mostrado}' desactiva la protección. {reason}"))
-            elif esperado is not None and actual != esperado:
-                findings.append((clave, level, f"'{clave}={actual}' no es '{esperado}'. {reason}"))
+        for key, expected, level, reason in essential_directives:
+            current = active.get(key)
+            if current is None:
+                findings.append((key, level, f"Missing isolation directive '{key}='. {reason}"))
+            elif current in disabled_values:
+                shown = current or "empty"
+                findings.append((key, level, f"'{key}={shown}' disables the protection. {reason}"))
+            elif expected is not None and current != expected:
+                findings.append((key, level, f"'{key}={current}' is not '{expected}'. {reason}"))
 
         if not findings:
-            findings.append(("SYSTEMD", "OK", "El archivo de servicio cuenta con aislamiento de seguridad defensivo."))
+            findings.append(("SYSTEMD", "OK", "The service file has the essential isolation directives."))
 
         return findings

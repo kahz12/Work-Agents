@@ -1,27 +1,28 @@
 from typing import Any, Dict, List, Optional
 
-# {where} es "Línea N" o, si se conoce el archivo, "ruta/archivo.py:N".
+# One template per SOLID/reliability principle. {where} is "Line N" or, when the file is
+# known, "path/to/file.py:N"; {msg} is the auditor's own message.
 _PRINCIPLE_TEMPLATES = {
-    "OCP": "[DISEÑO OCP - {where}] Sustituye cadenas if/elif extensas por el patrón Estrategia (Strategy Pattern) o Polimorfismo.",
-    "SRP": "[DISEÑO SRP - {where}] Divide la clase monolítica aplicando el principio de Responsabilidad Única.",
-    "DIP": "[DISEÑO DIP - {where}] Inyecta las dependencias a través del constructor en lugar de instanciarlas internamente.",
-    "GUARD": "[ARQUITECTURA - FAIL FAST - {where}] {msg}",
-    "EXCEPTION-HYGIENE": "[FIABILIDAD - EXCEPCIONES - {where}] {msg}",
-    "STATE-SAFETY": "[ESTADO Y PUREZA - {where}] {msg}",
-    "DATA-CONTRACT": "[CONTRATO DE DATOS - {where}] {msg}",
+    "OCP": "[DESIGN OCP - {where}] Replace long if/elif chains with the Strategy pattern or polymorphism.",
+    "SRP": "[DESIGN SRP - {where}] Split the monolithic class following the Single Responsibility Principle.",
+    "DIP": "[DESIGN DIP - {where}] Inject dependencies through the constructor instead of instantiating them inside it.",
+    "GUARD": "[ARCHITECTURE - FAIL FAST - {where}] {msg}",
+    "EXCEPTION-HYGIENE": "[RELIABILITY - EXCEPTIONS - {where}] {msg}",
+    "STATE-SAFETY": "[STATE AND PURITY - {where}] {msg}",
+    "DATA-CONTRACT": "[DATA CONTRACT - {where}] {msg}",
 }
 
-# Solo es cierto si nada de lo analizado tiene recomendaciones.
+# Only true when nothing analysed produced a recommendation; callers decide when that holds.
 EXCELLENT = (
-    "[EXCELENTE] El código analizado cumple con métricas óptimas de mantenibilidad, "
-    "fiabilidad, rendimiento y principios SOLID."
+    "[EXCELLENT] The analysed code meets every maintainability, reliability, performance "
+    "and SOLID threshold."
 )
 
 
 class RefactorSuggester:
     """
-    Motor de recomendaciones de refactorización para mejorar mantenibilidad,
-    fiabilidad arquitectónica y rendimiento Big-O / memoria / I/O.
+    Turns metrics and audit findings into concrete refactoring recommendations covering
+    maintainability, reliability and Big-O / memory / I/O performance.
     """
 
     @staticmethod
@@ -33,47 +34,48 @@ class RefactorSuggester:
         location: Optional[str] = None,
     ) -> List[str]:
         """
-        Sintetiza métricas, hallazgos SOLID/fiabilidad y hallazgos de rendimiento
-        en recomendaciones concretas de refactorización.
+        Combine metrics, SOLID/reliability findings and performance findings into concrete
+        refactoring recommendations.
 
-        Sin recomendaciones devuelve EXCELLENT, salvo con praise_if_clean=False: quien combina
-        varias llamadas (un análisis archivo por archivo) decide al final si el elogio procede.
+        With nothing to recommend it returns [EXCELLENT], unless praise_if_clean=False: a caller
+        that combines several calls (a file-by-file analysis) decides at the end whether the
+        praise is deserved.
 
-        location es el archivo al que pertenecen métricas y hallazgos. Con él, cada recomendación
-        dice dónde aplicarla ("app.py:12" en vez de "Línea 12"), lo que hace falta al juntar las
-        de varios archivos. Sin él se conserva el formato por línea.
+        location is the file the metrics and findings belong to. With it, each recommendation
+        says where to apply it ("app.py:12" instead of "Line 12"), which matters once
+        recommendations from several files are merged. Without it, the per-line form is kept.
         """
         recs: List[str] = []
         scope = f" - {location}" if location else ""
 
         def where(line: Any) -> str:
-            return f"{location}:{line}" if location else f"Línea {line}"
+            return f"{location}:{line}" if location else f"Line {line}"
 
-        # Evaluar la complejidad ciclomática media respecto al umbral estándar de testabilidad unitaria (5.0).
+        # Average cyclomatic complexity above 5: functions with that many paths get hard to unit test.
         avg_cc = metrics.get("avg_cyclomatic_complexity", 1.0)
         if avg_cc > 5.0:
             recs.append(
-                f"[REFACTOR{scope}] La complejidad ciclomática promedio es alta ({avg_cc}). "
-                "Aplica la técnica 'Extraer Método' (Extract Method) para descomponer funciones complejas."
+                f"[REFACTOR{scope}] The average cyclomatic complexity is high ({avg_cc}). "
+                "Use Extract Method to break complex functions down."
             )
 
-        # Evaluar la complejidad cognitiva media considerando la penalización acumulada por anidamiento profundo.
+        # Average cognitive complexity above 10: nesting makes the code hard to follow.
         avg_cog = metrics.get("avg_cognitive_complexity", 0.0)
         if avg_cog > 10.0:
             recs.append(
-                f"[ARQUITECTURA - FAIL FAST{scope}] La complejidad cognitiva promedio es elevada ({avg_cog}). "
-                "Reduce el anidamiento aplicando Cláusulas de Guarda (Guard Clauses) y descomposición funcional."
+                f"[ARCHITECTURE - FAIL FAST{scope}] The average cognitive complexity is high ({avg_cog}). "
+                "Reduce nesting with guard clauses and functional decomposition."
             )
 
-        # Verificar densidad mínima de documentación en módulos con tamaño no trivial (> 50 líneas efectivas).
+        # Documentation density below 5%, only for modules big enough to matter (> 50 lines of code).
         comment_ratio = metrics.get("comment_ratio", 0.0)
         if comment_ratio < 5.0 and metrics.get("code_loc", 0) > 50:
             recs.append(
-                f"[DOCUMENTACION{scope}] El ratio de documentación es inferior al 5%. "
-                "Agrega docstrings a funciones y módulos principales para facilitar el mantenimiento futuro."
+                f"[DOCUMENTATION{scope}] Less than 5% of the lines are documentation. "
+                "Add docstrings to the main functions and modules to ease future maintenance."
             )
 
-        # Traducir cada hallazgo arquitectónico SOLID en una recomendación accionable según su categoría.
+        # One actionable recommendation per SOLID/reliability finding, worded by principle.
         for item in solid_findings:
             if len(item) == 4:
                 line, principle, _, msg = item
@@ -81,7 +83,7 @@ class RefactorSuggester:
                 if template:
                     recs.append(template.format(where=where(line), msg=msg))
 
-        # Incorporar las alertas de eficiencia algorítmica, consumo de memoria y bloqueo del bucle asíncrono.
+        # Performance findings (algorithmic cost, memory, blocking I/O) are passed through with their location.
         for item in metrics.get("performance_findings", []):
             if len(item) == 4:
                 line, category, level, msg = item

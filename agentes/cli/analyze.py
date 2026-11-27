@@ -1,5 +1,5 @@
 """
-Comandos CLI de análisis: pipeline, analyze, secrets, vulns, audit y metrics.
+Analysis commands: pipeline, analyze, secrets, vulns, audit and metrics.
 """
 from __future__ import annotations
 
@@ -33,16 +33,16 @@ AUDIT_TYPES = ["auto", *audits.AUDIT_KINDS, "headers"]
 
 
 def cmd_pipeline(args: argparse.Namespace) -> int:
-    """Ejecuta la auditoría completa de 6 etapas y genera informes HTML/JSON/SARIF."""
+    """Run the full six-stage audit and write the HTML/JSON/SARIF reports."""
     from ..common.orchestrator import run_pipeline
 
     target = require_path(args.path)
     if args.baseline and args.write_baseline:
-        raise CliError("--baseline y --write-baseline no se pueden usar a la vez.")
+        raise CliError("--baseline and --write-baseline cannot be used together.")
     if args.baseline:
         require_path(args.baseline, "file")
     if not args.json:
-        ui.hint(f"Analizando {rel(target)} ...")
+        ui.hint(f"Analysing {rel(target)} ...")
     try:
         report, code = run_pipeline(
             target,
@@ -54,7 +54,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
             baseline=args.baseline,
             exclude=[args.write_baseline] if args.write_baseline else None,
         )
-    except ValueError as exc:  # línea base ilegible o con otro formato
+    except ValueError as exc:  # the baseline is unreadable or not in our format
         raise CliError(str(exc)) from exc
 
     if args.write_baseline:
@@ -62,9 +62,9 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 
         root = os.path.dirname(target) if os.path.isfile(target) else target
         saved, skipped = write_baseline(args.write_baseline, report.get("findings", []), root, version=__version__)
-        ui.ok(f"Línea base escrita en {rel(args.write_baseline)}: {saved} hallazgos aceptados.")
-        ui.hint(f"Los {skipped} hallazgos medios o bajos no se guardan porque no hacen fallar el pipeline.")
-        ui.hint("Revisa el archivo antes de versionarlo: todo lo que contiene dejará de hacer fallar el análisis.")
+        ui.ok(f"Baseline written to {rel(args.write_baseline)}: {saved} findings accepted.")
+        ui.hint(f"The {skipped} medium or low findings are not stored, because they never fail the pipeline.")
+        ui.hint("Review the file before committing it: everything it lists will stop failing the analysis.")
         return 0
     if args.json:
         emit_json(report)
@@ -75,7 +75,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 
 
 def _render_pipeline_summary(target: str, report: Dict[str, Any], code: int, limit: int) -> None:
-    ui.title(f"Auditoría de {rel(target)}")
+    ui.title(f"Audit of {rel(target)}")
     rows = []
     for stage in report.get("stages", []):
         rows.append((
@@ -84,14 +84,14 @@ def _render_pipeline_summary(target: str, report: Dict[str, Any], code: int, lim
             stage.get("summary", ""),
         ))
     ui.out()
-    ui.table(["Etapa", "Estado", "Resumen"], rows)
+    ui.table(["Stage", "Status", "Summary"], rows)
 
     accepted = report.get("baseline")
     if accepted:
         ui.out()
-        ui.hint(f"Línea base {rel(accepted['file'])}: {accepted['suppressed']} hallazgos aceptados no cuentan.")
+        ui.hint(f"Baseline {rel(accepted['file'])}: {accepted['suppressed']} accepted findings are not counted.")
         if accepted.get("unused"):
-            ui.hint(f"  {accepted['unused']} entradas ya no aparecen: regenera la línea base para retirarlas.")
+            ui.hint(f"  {accepted['unused']} entries no longer match anything: regenerate the baseline to drop them.")
 
     if report.get("inline_suppressed"):
         ui.out()
@@ -100,14 +100,14 @@ def _render_pipeline_summary(target: str, report: Dict[str, Any], code: int, lim
     skipped = report.get("files_skipped") or 0
     if skipped:
         ui.out()
-        ui.warn(f"{skipped} archivos .py quedaron fuera por --max-files.")
+        ui.warn(f"{skipped} .py files were left out because of --max-files.")
 
     findings = report.get("findings", [])
     if visible(findings):
         show_findings(findings, limit, security_checked=True)
 
     arts = report.get("artifacts", {})
-    ui.section("Informes")
+    ui.section("Reports")
     pairs = [("HTML", rel(arts.get("html", ""))), ("JSON", rel(arts.get("json", ""))), ("SARIF", rel(arts.get("sarif", "")))]
     openapi = os.path.join(os.path.dirname(arts.get("json", "")), "openapi.json")
     if os.path.isfile(openapi):
@@ -116,14 +116,14 @@ def _render_pipeline_summary(target: str, report: Dict[str, Any], code: int, lim
 
     ui.out()
     if code == 0:
-        ui.ok("Sin hallazgos bloqueantes.")
+        ui.ok("No blocking findings.")
     else:
-        ui.fail("Hay hallazgos bloqueantes (código de salida 1).")
-        ui.hint(f"Abre {rel(arts.get('html', ''))} en el navegador para ver el detalle.")
+        ui.fail("There are blocking findings (exit code 1).")
+        ui.hint(f"Open {rel(arts.get('html', ''))} in a browser for the details.")
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
-    """Ejecuta análisis estático de Python, infraestructura y dependencias."""
+    """Static analysis of Python code, infrastructure and dependencies, without the other pipeline stages."""
     from ..common.orchestrator import audit_infra_and_deps, dependency_vulnerability_stage
     from ..common.reporting import ensure_reports_dir, findings_to_sarif, write_json_report
 
@@ -155,21 +155,21 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         })
         return code
 
-    ui.title(f"Análisis estático de {rel(target)}")
-    ui.out(f"Archivos: {len(files) + infra_count} · Hallazgos: {len(findings)}")
-    ui.out(f"Vulnerabilidades en dependencias: {vuln_stage['summary']}")
+    ui.title(f"Static analysis of {rel(target)}")
+    ui.out(f"Files: {len(files) + infra_count} · Findings: {len(findings)}")
+    ui.out(f"Dependency vulnerabilities: {vuln_stage['summary']}")
     show_findings(findings, args.limit, security_checked=True)
     show_inline_note(silenced)
-    ui.section("Informes")
+    ui.section("Reports")
     ui.kv([("JSON", rel(json_path)), ("SARIF", rel(sarif_path))])
     if high and not args.fail_on_high:
         ui.out()
-        ui.hint("Para que el comando falle con hallazgos altos o críticos, añade --fail-on-high.")
+        ui.hint("To make the command fail on high or critical findings, add --fail-on-high.")
     return code
 
 
 def cmd_secrets(args: argparse.Namespace) -> int:
-    """Busca claves, tokens y credenciales incrustadas en código y configuración."""
+    """Look for keys, tokens and credentials embedded in code and configuration."""
     from ..common.orchestrator import _iter_secret_scan_files
 
     target = require_path(args.path)
@@ -185,30 +185,30 @@ def cmd_secrets(args: argparse.Namespace) -> int:
                    "inline_suppressed": silenced})
         return code
 
-    ui.title(f"Búsqueda de secretos en {rel(target)}")
-    ui.out(f"Archivos revisados: {len(files)}")
-    show_findings(findings, args.limit, empty="No se encontraron secretos.")
+    ui.title(f"Secret scan of {rel(target)}")
+    ui.out(f"Files scanned: {len(files)}")
+    show_findings(findings, args.limit, empty="No secrets found.")
     show_inline_note(silenced)
     if findings:
         ui.out()
-        ui.hint("Los valores se muestran enmascarados. Si un secreto llegó a publicarse, rótalo además de borrarlo.")
+        ui.hint("Values are shown masked. If a secret was ever published, rotate it as well as deleting it.")
     return code
 
 
 def _audit_headers(url: str) -> List[Finding]:
     req = urllib.request.Request(url, headers={"User-Agent": f"agentes-cli/{__version__}"})
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310 - el esquema se valida antes
+        with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310 - the caller only passes http(s) URLs
             headers = dict(resp.headers.items())
     except urllib.error.HTTPError as exc:
         headers = dict(exc.headers.items()) if exc.headers else {}
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise CliError(f"No se pudo conectar con {url}: {exc}") from exc
+        raise CliError(f"Could not connect to {url}: {exc}") from exc
     return audits.audit_http_headers(url, headers)
 
 
 def _audit_directory(target: str) -> Tuple[List[Finding], int]:
-    """Infraestructura y dependencias como en el pipeline, más los .env y logs del árbol."""
+    """Infrastructure and dependencies as in the pipeline, plus every .env file and log in the tree."""
     from ..common.orchestrator import _should_skip_dir, audit_infra_and_deps
 
     infra, count = audit_infra_and_deps(target)
@@ -227,28 +227,28 @@ def _resolve_audit_target(target: str, type_arg: str) -> Tuple[List[Finding], in
     is_url = re.match(r"^https?://", target, re.IGNORECASE) is not None
     if is_url or type_arg == "headers":
         if not is_url:
-            raise CliError("La auditoría de cabeceras necesita una URL http:// o https://.")
-        return _audit_headers(target), 1, "cabeceras HTTP", target
+            raise CliError("The headers audit needs an http:// or https:// URL.")
+        return _audit_headers(target), 1, "HTTP headers", target
 
     full = require_path(target)
     shown_target = rel(full)
     if os.path.isdir(full):
         if type_arg != "auto":
-            raise CliError("--type solo se aplica a un archivo. En un directorio se detecta cada archivo por su nombre.")
+            raise CliError("--type only applies to a single file. In a directory, each file's kind is inferred from its name.")
         findings, count = _audit_directory(full)
-        return findings, count, "infraestructura, dependencias, .env y logs", shown_target
+        return findings, count, "infrastructure, dependencies, .env and logs", shown_target
 
     kind = type_arg if type_arg != "auto" else audits.detect_kind(full)
     if kind is None:
         raise CliError(
-            f"No sé qué tipo de archivo es {target}.",
-            "Indícalo con --type: " + ", ".join(audits.AUDIT_KINDS) + ". Para código Python usa 'agentes analyze'.",
+            f"Cannot tell what kind of file {target} is.",
+            "Pass it with --type: " + ", ".join(audits.AUDIT_KINDS) + ". For Python code, use 'agentes analyze'.",
         )
     return audits.audit_file(full, kind), 1, kind, shown_target
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
-    """Audita un archivo de configuración/infraestructura, directorio o cabeceras HTTP."""
+    """Audit a configuration/infrastructure file, a directory, or a URL's HTTP headers."""
     findings, count, label, shown_target = _resolve_audit_target(args.target, args.type)
     findings, silenced = drop_inline(findings)
     code = 1 if blocking_count(findings) else 0
@@ -258,19 +258,19 @@ def cmd_audit(args: argparse.Namespace) -> int:
                    "inline_suppressed": silenced})
         return code
 
-    ui.title(f"Auditoría de {shown_target}")
-    ui.out(f"Tipo: {label} · Elementos revisados: {count}")
+    ui.title(f"Audit of {shown_target}")
+    ui.out(f"Kind: {label} · Items checked: {count}")
     show_findings(findings, args.limit)
     show_inline_note(silenced)
     return code
 
 
 def _vuln_rows(findings: List[Finding]) -> None:
-    show_findings(findings, 0, empty="Ninguna vulnerabilidad conocida.")
+    show_findings(findings, 0, empty="No known vulnerabilities.")
 
 
 def cmd_vulns(args: argparse.Namespace) -> int:
-    """Consulta OSV para detectar vulnerabilidades conocidas en dependencias declaradas o instaladas."""
+    """Query OSV for known vulnerabilities in declared or installed dependencies."""
     from ..common.orchestrator import _iter_dependency_manifests
     from ..quality import vulnerabilities
     from ..quality.package_index import is_offline
@@ -281,19 +281,19 @@ def cmd_vulns(args: argparse.Namespace) -> int:
     environments = vulnerabilities.find_environments(root) if os.path.isdir(target) else []
     if not manifests and not environments:
         raise CliError(
-            f"No hay manifiestos de dependencias ni entornos instalados en {args.path}.",
-            "Se leen requirements*.txt, pyproject.toml, package.json, archivos de bloqueo y el .venv del proyecto.",
+            f"No dependency manifests or installed environments in {args.path}.",
+            "requirements*.txt, pyproject.toml, package.json, lock files and the project's .venv are read.",
         )
     if is_offline():
         raise CliError(
-            "Este comando necesita consultar OSV y está activo el modo sin conexión.",
-            "Quita --offline o la variable AGENTES_OFFLINE.",
+            "This command needs to query OSV, but offline mode is on.",
+            "Remove --offline or unset AGENTES_OFFLINE.",
         )
     if not args.json:
-        ui.hint(f"Consultando OSV ({len(manifests)} manifiestos, {len(environments)} entornos instalados) ...")
+        ui.hint(f"Querying OSV ({len(manifests)} manifests, {len(environments)} installed environments) ...")
     result = vulnerabilities.scan(manifests, environments=environments, root=root)
     if result.error:
-        raise CliError(f"No se pudo consultar OSV: {result.error}", "Comprueba la conexión o repite más tarde.")
+        raise CliError(f"Could not query OSV: {result.error}", "Check the connection or try again later.")
     vuln_findings, silenced = drop_inline(result.findings)
     code = 1 if blocking_count(vuln_findings) else 0
 
@@ -307,31 +307,31 @@ def cmd_vulns(args: argparse.Namespace) -> int:
         })
         return code
 
-    ui.title(f"Vulnerabilidades en las dependencias de {rel(target)}")
-    pairs: List[Tuple[str, Any]] = [("Manifiestos", ", ".join(rel(m) for m in manifests) or "ninguno")]
+    ui.title(f"Dependency vulnerabilities in {rel(target)}")
+    pairs: List[Tuple[str, Any]] = [("Manifests", ", ".join(rel(m) for m in manifests) or "none")]
     if environments:
-        pairs.append(("Entornos instalados", ", ".join(f"{rel(e)} ({result.installed} paquetes)" for e in environments)))
-    pairs.append(("Paquetes comprobados", result.checked))
+        pairs.append(("Installed environments", ", ".join(f"{rel(e)} ({result.installed} packages)" for e in environments)))
+    pairs.append(("Packages checked", result.checked))
     ui.kv(pairs, indent=0)
     if result.unchecked:
         ui.out()
-        ui.warn(f"No se ha comprobado ninguna dependencia: las {result.unpinned} declaradas usan rangos y no hay "
-                "un entorno instalado ni un archivo de bloqueo con versiones exactas.")
-        ui.hint("Crea el .venv del proyecto o un archivo de bloqueo (poetry.lock, Pipfile.lock, requirements fijado) "
-                "y repite.")
+        ui.warn(f"No dependency was checked: all {result.unpinned} declared ones use ranges, and there is "
+                "no installed environment or lock file with exact versions.")
+        ui.hint("Create the project's .venv or a lock file (poetry.lock, Pipfile.lock, pinned requirements) "
+                "and run it again.")
         return 0
     if result.unpinned and not environments:
-        ui.warn(f"{result.unpinned} dependencias sin versión exacta no se pueden comprobar. "
-                "Fíjalas con 'agentes fix' o usa un archivo de bloqueo.")
-    show_findings(vuln_findings, args.limit, empty="Ninguna vulnerabilidad conocida.")
+        ui.warn(f"{result.unpinned} dependencies without an exact version cannot be checked. "
+                "Pin them with 'agentes fix' or use a lock file.")
+    show_findings(vuln_findings, args.limit, empty="No known vulnerabilities.")
     show_inline_note(silenced)
     if result.blocked_fixes:
-        ui.section("Restricciones que impiden instalar la corrección")
+        ui.section("Constraints that block installing the fix")
         for name, spec, file, fixed in result.blocked_fixes:
-            ui.bullet(f"{name}{spec} en {rel(file)}: la corrección necesita {fixed}. Amplía el límite superior.")
+            ui.bullet(f"{name}{spec} in {rel(file)}: the fix needs {fixed}. Raise the upper bound.")
     if vuln_findings:
         ui.out()
-        ui.hint("Actualiza cada paquete al menos a la versión corregida que se indica.")
+        ui.hint("Upgrade each package to at least the fixed version shown.")
     return code
 
 
@@ -355,7 +355,7 @@ def _collect_metrics_data(files: List[str]) -> Dict[str, Any]:
             continue
         total_lines += metrics["total_lines"]
         comment_lines += metrics["comment_lines"]
-        # Lo silenciado en su línea no aparece como hallazgo ni genera recomendación.
+        # Anything suppressed on its line is neither reported nor turned into a recommendation.
         solid = [(line, principle, level, rec) for line, principle, level, rec in SOLIDChecker.audit_file(fp)
                  if not inline.silences(Finding(fp, line, level, f"[{principle}] {rec}", f"SOLID-{principle}"))]
         perf = [(line, category, level, rec) for line, category, level, rec in metrics["performance_findings"]
@@ -416,50 +416,50 @@ def _render_metrics_tables(target: str, data: Dict[str, Any], limit_arg: int) ->
     recommendations = data["recommendations"]
     limit = limit_arg if limit_arg > 0 else None
 
-    ui.title(f"Métricas de {rel(target)}")
+    ui.title(f"Metrics for {rel(target)}")
     ui.kv([
-        ("Archivos", totals["files"]),
-        ("Líneas de código", totals["code_loc"]),
-        ("Funciones", totals["functions"]),
-        ("Complejidad ciclomática media", totals["avg_cyclomatic"]),
-        ("Complejidad cognitiva media", totals["avg_cognitive"]),
+        ("Files", totals["files"]),
+        ("Lines of code", totals["code_loc"]),
+        ("Functions", totals["functions"]),
+        ("Average cyclomatic complexity", totals["avg_cyclomatic"]),
+        ("Average cognitive complexity", totals["avg_cognitive"]),
     ], indent=0)
 
     if len(per_file) > 1:
-        ui.section("Archivos con mayor complejidad")
+        ui.section("Most complex files")
         ranked = sorted(per_file, key=lambda f: -f["avg_cyclomatic"])[:limit]
         ui.table(
-            ["Líneas", "Func.", "Ciclom.", "Cognit.", "Archivo"],
+            ["Lines", "Funcs", "Cyclom.", "Cognit.", "File"],
             [(f["code_loc"], f["functions"], f["avg_cyclomatic"], f["avg_cognitive"], rel(f["file"])) for f in ranked],
             right=(0, 1, 2, 3),
         )
 
     if functions:
-        ui.section("Funciones más complejas")
+        ui.section("Most complex functions")
         rows = []
         for name, fp, line, cyc, cog in (functions[:10] if limit else functions):
             color = "red" if cyc > 10 else ("yellow" if cyc > 5 else "green")
             rows.append(((cyc, color), cog, f"{name}  ({rel(fp)}:{line})"))
-        ui.table(["Ciclom.", "Cognit.", "Función"], rows, right=(0, 1))
-        ui.hint("  Referencia: hasta 5 es simple, de 6 a 10 conviene vigilarla, más de 10 pide dividirla.")
+        ui.table(["Cyclom.", "Cognit.", "Function"], rows, right=(0, 1))
+        ui.hint("  Reference: up to 5 is simple, 6 to 10 is worth watching, above 10 calls for splitting it up.")
 
     if visible(findings):
         show_findings(findings, limit_arg)
     show_inline_note(data["inline_suppressed"])
     if recommendations:
-        ui.section("Recomendaciones")
+        ui.section("Recommendations")
         for rec in recommendations[:limit]:
             ui.bullet(rec)
         if limit and len(recommendations) > limit:
-            ui.hint(f"  ... y {len(recommendations) - limit} más. Usa --limit 0 para verlas todas.")
+            ui.hint(f"  ... and {len(recommendations) - limit} more. Use --limit 0 to show them all.")
 
 
 def cmd_metrics(args: argparse.Namespace) -> int:
-    """Calcula métricas de complejidad, SOLID, rendimiento y recomendaciones de refactor."""
+    """Complexity metrics, SOLID and performance findings, and refactoring advice."""
     target = require_path(args.path)
     files = python_files(target)
     if not files:
-        raise CliError(f"No hay archivos .py en {args.path}.")
+        raise CliError(f"No .py files in {args.path}.")
 
     data = _collect_metrics_data(files)
     if args.json:

@@ -1,9 +1,8 @@
 """
-Cómo llaman a cada objetivo las suites generadas: valores de ejemplo según el tipo, construcción
-de objetos, tipos de método, import del módulo analizado, excepciones que la suite puede nombrar
-y el análisis de None. Al final, suites completas generadas para un paquete de ejemplo con
-imports relativos, clases de datos, E/S, red y un punto de entrada de línea de órdenes, que
-tienen que pasar sin tocar nada.
+How the generated suites call each target: sample values by type, object construction, method
+kinds, importing the analysed module, the exceptions a suite can name, and the None analysis.
+At the end, complete suites generated for a sample package with relative imports, dataclasses,
+I/O, network access and a command-line entry point, which must pass without any manual edits.
 """
 import ast
 import os
@@ -37,9 +36,9 @@ def _func(source: str):
     return ast.parse(textwrap.dedent(source)).body[0]
 
 
-# --- Valores de ejemplo según la anotación -------------------------------------------------------
+# --- Sample values by annotation -----------------------------------------------------------------
 
-@pytest.mark.parametrize("anotacion, expr, item", [
+@pytest.mark.parametrize("annotation, expr, item", [
     ("int", "1", None),
     ("List[int]", "[1]", "1"),
     ("Sequence[float]", "[1.0]", "1.0"),
@@ -52,47 +51,47 @@ def _func(source: str):
     ("'int'", "1", None),
     ("Type[int]", "int", None),
     ("Iterator[int]", "iter([])", None),
-    # Any dentro de un contenedor admite cualquier valor.
+    # Any inside a container accepts any value.
     ("Tuple[str, Any]", '("sample", "sample",)', None),
-    # Una lista de elementos que no se saben construir sigue siendo válida vacía.
-    ("List[Raro]", "[]", None),
+    # A list of elements that cannot be built is still valid when empty.
+    ("List[Odd]", "[]", None),
 ])
-def test_valor_de_ejemplo_segun_la_anotacion(anotacion, expr, item):
-    sample = cp.annotation_sample(_ann(anotacion), _ctx())
+def test_sample_value_from_the_annotation(annotation, expr, item):
+    sample = cp.annotation_sample(_ann(annotation), _ctx())
     assert sample is not None
     assert (sample.expr, sample.item, sample.assumed) == (expr, item, False)
 
 
-@pytest.mark.parametrize("anotacion", ["Raro", "Tuple[str, Raro]", "Type[Raro]"])
-def test_sin_valor_de_ejemplo_si_el_tipo_no_se_sabe_construir(anotacion):
-    """Una tupla tiene aridad fija: si falta un elemento, no hay ejemplo válido."""
-    assert cp.annotation_sample(_ann(anotacion), _ctx()) is None
+@pytest.mark.parametrize("annotation", ["Odd", "Tuple[str, Odd]", "Type[Odd]"])
+def test_no_sample_value_when_the_type_cannot_be_built(annotation):
+    """A tuple has a fixed arity: with one element missing there is no valid sample."""
+    assert cp.annotation_sample(_ann(annotation), _ctx()) is None
 
 
-def test_tipos_de_la_biblioteca_estandar_anotan_su_modulo():
+def test_standard_library_types_record_their_module():
     ctx = _ctx()
     assert cp.annotation_sample(_ann("Path"), ctx).expr == 'pathlib.Path("sample.txt")'
     assert cp.annotation_sample(_ann("datetime.date"), ctx).expr == "datetime.date(2024, 1, 1)"
     assert ctx.used_modules == {"pathlib", "datetime"}
 
 
-def test_alias_de_tipo_del_modulo():
+def test_module_type_alias():
     ctx = _ctx("from typing import List\nIds = List[int]\n")
     assert cp.annotation_sample(_ann("Ids"), ctx).expr == "[1]"
 
 
-def test_valores_limite_de_un_contenedor_tipado_respetan_el_tipo_del_elemento():
-    lista = cp.Sample("[1]", "list", False, "1")
-    assert cp.boundary_values(lista, "ids") == [("empty_list", "[]"), ("single_elem", "[1]"),
+def test_boundary_values_of_a_typed_container_respect_the_element_type():
+    items = cp.Sample("[1]", "list", False, "1")
+    assert cp.boundary_values(items, "ids") == [("empty_list", "[]"), ("single_elem", "[1]"),
                                                 ("two_elems", "[1, 1]")]
-    tabla = cp.Sample('{"sample": 1}', "dict", False, '"sample": 1')
-    assert cp.boundary_values(tabla, "tabla") == [("empty_dict", "{}"), ("single_kv", '{"sample": 1}')]
+    table = cp.Sample('{"sample": 1}', "dict", False, '"sample": 1')
+    assert cp.boundary_values(table, "table") == [("empty_dict", "{}"), ("single_kv", '{"sample": 1}')]
     assert cp.boundary_values(cp.Sample("Item()", "object", False), "item") == []
 
 
-# --- Construcción de objetos ---------------------------------------------------------------------
+# --- Object construction ---------------------------------------------------------------------------
 
-MODELOS = '''
+MODELS = '''
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -100,17 +99,17 @@ from typing import List, NamedTuple, Protocol
 
 
 class Color(Enum):
-    ROJO = 1
+    RED = 1
 
 
 @dataclass
 class Item:
-    nombre: str
-    cantidad: int = 1
-    etiquetas: List[str] = field(default_factory=list)
+    name: str
+    quantity: int = 1
+    tags: List[str] = field(default_factory=list)
 
 
-class Punto(NamedTuple):
+class Point(NamedTuple):
     x: float
     y: float
 
@@ -120,39 +119,39 @@ class Base(ABC):
     def area(self) -> float: ...
 
 
-class Cuadrado(Base):
-    def __init__(self, lado: float, *, color: Color):
-        self.lado = lado
+class Square(Base):
+    def __init__(self, side: float, *, color: Color):
+        self.side = side
 
     def area(self) -> float:
-        return self.lado ** 2
+        return self.side ** 2
 
 
-class Dibujable(Protocol):
-    def dibuja(self) -> None: ...
+class Drawable(Protocol):
+    def draw(self) -> None: ...
 '''
 
 
-@pytest.mark.parametrize("clase, esperado", [
+@pytest.mark.parametrize("class_name, expected", [
     ("Color", "list(Color)[0]"),
-    # Los campos con valor por defecto (también default_factory) no se pasan.
+    # Fields with a default value (default_factory included) are not passed.
     ("Item", 'Item("alice")'),
-    ("Punto", "Punto(1, 1)"),
-    ("Cuadrado", "Cuadrado(1, color=list(Color)[0])"),
+    ("Point", "Point(1, 1)"),
+    ("Square", "Square(1, color=list(Color)[0])"),
     ("Base", None),
-    ("Dibujable", None),
+    ("Drawable", None),
 ])
-def test_construccion_de_clases_del_modulo(clase, esperado):
-    assert cp.construct_expr(clase, _ctx(MODELOS)) == esperado
+def test_constructing_module_classes(class_name, expected):
+    assert cp.construct_expr(class_name, _ctx(MODELS)) == expected
 
 
-def test_una_clase_abstracta_se_omite_con_su_motivo():
-    expr, motivo = cp.instantiation_for("Base", _ctx(MODELOS))
-    assert expr is None and motivo == "Base es abstracta: no se puede instanciar."
+def test_an_abstract_class_is_skipped_with_its_reason():
+    expr, reason = cp.instantiation_for("Base", _ctx(MODELS))
+    assert expr is None and reason == "Base is abstract: it cannot be instantiated."
 
 
-def test_tipos_de_metodo():
-    clase = _func('''
+def test_method_kinds():
+    klass = _func('''
         class C:
             @property
             def p(self): ...
@@ -170,11 +169,11 @@ def test_tipos_de_metodo():
             def a(self): ...
             def m(self): ...
     ''')
-    kinds = [ai.method_kind(item) for item in clase.body]
+    kinds = [ai.method_kind(item) for item in klass.body]
     assert kinds == ["property", "setter", "static", "class", "property", "overload", "abstract", "method"]
 
 
-def test_receptor_de_metodos_estaticos_propiedades_y_metodos_normales():
+def test_receiver_for_static_methods_properties_and_plain_methods():
     ctx = _ctx('''
         class C:
             def __init__(self, x: int):
@@ -190,30 +189,30 @@ def test_receptor_de_metodos_estaticos_propiedades_y_metodos_normales():
     assert cp.receiver_for("C", "m", ctx).setup == "C(1)"
 
 
-def test_plan_de_llamada():
-    """Solo se pasan los obligatorios; los literales por defecto entran en la evaluación estática."""
+def test_call_plan():
+    """Only required arguments are passed; literal defaults still feed the static evaluation."""
     plan = cp.plan_call(_func("def f(a: int, b, c=3, *, d: str, e=None):\n    return b.lower()\n"), _ctx())
     assert plan.arg_str == '2, "sample", d="sample"'
     assert plan.static_names == ["a", "b", "c", "d", "e"]
     assert plan.static_values == ["2", '"sample"', "3", '"sample"', "None"]
-    # b no tiene tipo: su valor sale de cómo lo usa el cuerpo (.lower()) y es un supuesto.
+    # b has no type: its value comes from how the body uses it (.lower()) and is an assumption.
     assert plan.assumed == ["b"] and plan.missing == []
     assert plan.with_first("None") == 'None, "sample", d="sample"'
 
 
-def test_plan_de_llamada_con_un_tipo_que_no_se_sabe_construir():
-    plan = cp.plan_call(_func("def f(x: Raro):\n    return x\n"), _ctx())
-    assert plan.missing == ["x (Raro)"] and plan.first is None
+def test_call_plan_with_a_type_that_cannot_be_built():
+    plan = cp.plan_call(_func("def f(x: Odd):\n    return x\n"), _ctx())
+    assert plan.missing == ["x (Odd)"] and plan.first is None
 
 
-# --- Nombres del módulo y excepciones ------------------------------------------------------------
+# --- Module names and exceptions -------------------------------------------------------------------
 
-def test_nombres_que_define_seguro_el_modulo():
+def test_names_the_module_certainly_binds():
     tree = ast.parse(textwrap.dedent('''
         import os.path
         import json as js
         from typing import TYPE_CHECKING
-        from otro import *
+        from other import *
         try:
             import yaml
         except ImportError:
@@ -235,74 +234,74 @@ def test_nombres_que_define_seguro_el_modulo():
     assert cp.module_bindings(tree.body) == {"os", "js", "TYPE_CHECKING", "yaml", "A", "CONST", "K", "f"}
 
 
-@pytest.mark.parametrize("nombre, importar", [
+@pytest.mark.parametrize("name, to_import", [
     ("ValueError", ""),
-    ("ErrorPropio", "ErrorPropio"),
+    ("CustomError", "CustomError"),
     ("binascii.Error", "binascii"),
-    # os ya lo importa la cabecera de la suite.
+    # The suite header already imports os.
     ("os.error", ""),
-    # Un nombre del módulo tapa al de builtins.
+    # A module-level name shadows the builtin.
     ("TimeoutError", "TimeoutError"),
     ("exc", None),
     ("self.error", None),
     ("print", None),
     ("json.JSONDecodeError", None),
 ])
-def test_como_nombra_la_suite_cada_excepcion(nombre, importar):
-    ctx = _ctx("import binascii\nimport os\nclass ErrorPropio(Exception): ...\nclass TimeoutError(Exception): ...\n")
-    assert ctx.exception_import(nombre) == importar
+def test_how_the_suite_names_each_exception(name, to_import):
+    ctx = _ctx("import binascii\nimport os\nclass CustomError(Exception): ...\nclass TimeoutError(Exception): ...\n")
+    assert ctx.exception_import(name) == to_import
 
 
-def test_usar_una_excepcion_anota_lo_que_hay_que_importar():
+def test_using_an_exception_records_what_to_import():
     ctx = _ctx("import binascii\n")
     assert ctx.use_exception("binascii.Error") and ctx.used_names == {"binascii"}
     assert ctx.use_exception("ValueError") and ctx.used_names == {"binascii"}
     assert not ctx.use_exception("exc")
 
 
-def test_las_excepciones_y_los_assert_de_los_helpers_se_propagan_a_quien_los_llama(tmp_path):
+def test_helpers_exceptions_and_asserts_propagate_to_their_callers(tmp_path):
     src = tmp_path / "m.py"
     src.write_text(textwrap.dedent('''
-        class ErrorPropio(Exception):
+        class CustomError(Exception):
             pass
 
-        def _valida(x):
+        def _validate(x):
             if not x:
-                raise ErrorPropio("vacío")
+                raise CustomError("empty")
 
-        def publica(x):
-            _valida(x)
+        def public(x):
+            _validate(x)
             return x
 
-        def _positivo(x):
+        def _positive(x):
             assert x > 0
 
-        def mitad(x):
-            _positivo(x)
+        def half(x):
+            _positive(x)
             return x // 2
     '''), encoding="utf-8")
     visitor = ai.UnitTestGenerator(str(src))
     visitor.visit(ast.parse(src.read_text(encoding="utf-8")))
-    meta = visitor.function_meta["publica"]
-    assert meta["raises"] == [] and meta["raises_reachable"] == [("ErrorPropio", "vacío")]
-    assert not meta["bare_assert"] and visitor.function_meta["mitad"]["bare_assert"]
+    meta = visitor.function_meta["public"]
+    assert meta["raises"] == [] and meta["raises_reachable"] == [("CustomError", "empty")]
+    assert not meta["bare_assert"] and visitor.function_meta["half"]["bare_assert"]
 
 
-# --- Import del módulo analizado -----------------------------------------------------------------
+# --- Importing the analysed module -------------------------------------------------------------------
 
-def test_nombre_del_modulo_dentro_de_un_paquete(tmp_path):
+def test_module_name_inside_a_package(tmp_path):
     sub = tmp_path / "pkg" / "sub"
     sub.mkdir(parents=True)
     for init in (tmp_path / "pkg" / "__init__.py", sub / "__init__.py"):
         init.write_text("", encoding="utf-8")
     (sub / "mod.py").write_text("", encoding="utf-8")
-    (tmp_path / "suelto.py").write_text("", encoding="utf-8")
+    (tmp_path / "standalone.py").write_text("", encoding="utf-8")
     assert cp.module_import(str(sub / "mod.py")) == ("pkg.sub.mod", str(tmp_path))
     assert cp.module_import(str(sub / "__init__.py")) == ("pkg.sub", str(tmp_path))
-    assert cp.module_import(str(tmp_path / "suelto.py")) == ("suelto", str(tmp_path))
+    assert cp.module_import(str(tmp_path / "standalone.py")) == ("standalone", str(tmp_path))
 
 
-def test_cabecera_de_import_relativa_a_la_suite(tmp_path):
+def test_import_header_relative_to_the_suite(tmp_path):
     lines = cp.import_header(str(tmp_path / "pkg" / "mod.py"), str(tmp_path / "tests" / "test_mod.py"),
                              {"b", "a"}, {"pathlib"})
     assert "import pathlib" in lines
@@ -310,51 +309,51 @@ def test_cabecera_de_import_relativa_a_la_suite(tmp_path):
     assert lines[-1] == "from mod import a, b  # noqa: E402"
 
 
-# --- Análisis del cuerpo -------------------------------------------------------------------------
+# --- Body analysis -----------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("source, esperado", [
+@pytest.mark.parametrize("source, expected", [
     ("def main():\n    return sys.argv[1:]\n", True),
     ("def main():\n    sys.exit(1)\n", True),
     ("def main():\n    raise SystemExit(2)\n", True),
     ("def main():\n    exit()\n", True),
     ("def f(argv):\n    return argv\n", False),
 ])
-def test_punto_de_entrada_de_linea_de_ordenes(source, esperado):
-    assert ai.is_cli_entrypoint(_func(source)) is esperado
+def test_command_line_entry_point(source, expected):
+    assert ai.is_cli_entrypoint(_func(source)) is expected
 
 
-@pytest.mark.parametrize("source, esperado", [
+@pytest.mark.parametrize("source, expected", [
     ("def f(x):\n    return len(x)\n", {"x"}),
     ("def f(x):\n    if x is None:\n        return 0\n    return x + 1\n", set()),
     ("def f(x):\n    yield len(x)\n", set()),
     ("def f(x):\n    try:\n        return len(x)\n    except TypeError:\n        return 0\n", set()),
 ])
-def test_parametros_que_el_cuerpo_usa_sin_comprobar_si_son_none(source, esperado):
-    assert ai.none_unsafe_params(_func(source)) == esperado
+def test_parameters_the_body_uses_without_checking_for_none(source, expected):
+    assert ai.none_unsafe_params(_func(source)) == expected
 
 
-def test_assert_sin_mensaje():
+def test_assert_without_a_message():
     assert ai.has_bare_assert(_func("def f(x):\n    assert x > 0\n    return x\n"))
-    assert not ai.has_bare_assert(_func("def f(x):\n    assert x > 0, 'positivo'\n    return x\n"))
+    assert not ai.has_bare_assert(_func("def f(x):\n    assert x > 0, 'positive'\n    return x\n"))
     assert not ai.has_bare_assert(None)
 
 
-# --- Aislamiento de las suites generadas ---------------------------------------------------------
+# --- Isolation of the generated suites ---------------------------------------------------------------
 
 def _isolation_namespace() -> dict:
     import io
 
     namespace = {"io": io, "socket": socket}
-    exec("\n".join(emitters._ISOLATION_HELPERS), namespace)  # agentes: ignore[dynamic-exec] - código fijo del generador
+    exec("\n".join(emitters._ISOLATION_HELPERS), namespace)  # agentes: ignore[dynamic-exec] - fixed generator code
     return namespace
 
 
-def test_el_aislamiento_bloquea_la_red_salvo_las_conexiones_locales():
+def test_isolation_blocks_the_network_except_local_connections():
     ns = _isolation_namespace()
-    with pytest.raises(socket.gaierror, match="Red bloqueada"):
+    with pytest.raises(socket.gaierror, match="Network blocked"):
         ns["_qa_local_getaddrinfo"]("example.com", 80)
     assert ns["_qa_local_getaddrinfo"]("127.0.0.1", 80)
-    with socket.socket() as sock, pytest.raises(OSError, match="Red bloqueada"):
+    with socket.socket() as sock, pytest.raises(OSError, match="Network blocked"):
         ns["_qa_local_connect"](sock, ("203.0.113.1", 80))
     with socket.socket() as server, socket.socket() as client:
         server.bind(("127.0.0.1", 0))
@@ -362,26 +361,26 @@ def test_el_aislamiento_bloquea_la_red_salvo_las_conexiones_locales():
         ns["_qa_local_connect"](client, server.getsockname())
 
 
-def test_el_aislamiento_da_una_entrada_estandar_vacia():
+def test_isolation_provides_an_empty_standard_input():
     stdin = _isolation_namespace()["_qa_empty_stdin"]()
     assert stdin.readline() == "" and stdin.buffer.read() == b""
 
 
-# --- Suites completas sobre un paquete de ejemplo ------------------------------------------------
+# --- Complete suites for a sample package ----------------------------------------------------------
 
 UTIL = '''import urllib.request
 
 
-def doble(x: int) -> int:
+def double(x: int) -> int:
     return x * 2
 
 
-def consulta(url: str) -> bytes:
+def fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=5) as resp:
         return resp.read()
 '''
 
-PAQUETE = '''"""Módulo de ejemplo para las suites generadas."""
+PACKAGE = '''"""Sample module for the generated suites."""
 import binascii
 import os
 import sys
@@ -389,104 +388,104 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List
 
-from .util import consulta, doble
+from .util import double, fetch
 
 
-class ErrorDeValidacion(Exception):
+class InvalidInputError(Exception):
     pass
 
 
 class Color(Enum):
-    ROJO = 1
-    VERDE = 2
+    RED = 1
+    GREEN = 2
 
 
 @dataclass
 class Item:
-    nombre: str
-    cantidad: int = 1
+    name: str
+    quantity: int = 1
 
 
-class Inventario:
+class Inventory:
     def __init__(self, items: List[Item]):
         self.items = items
 
     @property
     def total(self) -> int:
-        return sum(i.cantidad for i in self.items)
+        return sum(i.quantity for i in self.items)
 
     @staticmethod
-    def vacio() -> "Inventario":
-        return Inventario([])
+    def empty() -> "Inventory":
+        return Inventory([])
 
     @classmethod
-    def de_nombres(cls, nombres: List[str]) -> "Inventario":
-        return cls([Item(n) for n in nombres])
+    def from_names(cls, names: List[str]) -> "Inventory":
+        return cls([Item(n) for n in names])
 
-    def nombres(self) -> List[str]:
-        return [i.nombre for i in self.items]
-
-
-def cantidades(items: List[Item]) -> List[int]:
-    return [doble(i.cantidad) for i in items]
+    def names(self) -> List[str]:
+        return [i.name for i in self.items]
 
 
-def pinta(color: Color) -> str:
+def quantities(items: List[Item]) -> List[int]:
+    return [double(i.quantity) for i in items]
+
+
+def paint(color: Color) -> str:
     return color.name.lower()
 
 
-def _comprueba(texto: str) -> None:
-    if not texto.strip():
-        raise ErrorDeValidacion("texto vacío")
+def _check(raw: str) -> None:
+    if not raw.strip():
+        raise InvalidInputError("empty text")
 
 
-def normaliza(texto: str) -> str:
-    _comprueba(texto)
-    return texto.strip()
+def normalise(raw: str) -> str:
+    _check(raw)
+    return raw.strip()
 
 
-def codifica(datos: bytes) -> bytes:
-    if len(datos) % 2:
-        raise binascii.Error("longitud impar")
-    return binascii.hexlify(datos)
+def encode(data: bytes) -> bytes:
+    if len(data) % 2:
+        raise binascii.Error("odd length")
+    return binascii.hexlify(data)
 
 
-def lee(ruta: str) -> str:
-    with open(ruta, encoding="utf-8") as f:
+def read_file(file_path: str) -> str:
+    with open(file_path, encoding="utf-8") as f:
         return f.read()
 
 
-def borra_si(ruta: str, activo: bool = False) -> bool:
-    if activo:
-        os.remove(ruta)
-    return activo
+def delete_if(file_path: str, enabled: bool = False) -> bool:
+    if enabled:
+        os.remove(file_path)
+    return enabled
 
 
-def pregunta() -> str:
+def ask() -> str:
     return sys.stdin.readline().strip()
 
 
-def estado(url: str = "http://example.com/") -> str:
+def status(url: str = "http://example.com/") -> str:
     try:
-        consulta(url)
+        fetch(url)
     except OSError as exc:
         return str(exc)
-    return "conectado"
+    return "connected"
 
 
 def main() -> int:
-    print(Inventario.de_nombres(sys.argv[1:]).nombres())
+    print(Inventory.from_names(sys.argv[1:]).names())
     return 0
 '''
 
 
 @pytest.fixture
-def paquete(tmp_path):
+def package(tmp_path):
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "util.py").write_text(UTIL, encoding="utf-8")
-    (pkg / "modelos.py").write_text(PAQUETE, encoding="utf-8")
+    (pkg / "models.py").write_text(PACKAGE, encoding="utf-8")
     (tmp_path / "tests").mkdir()
     return tmp_path
 
@@ -496,65 +495,65 @@ def _run(args, cwd):
 
 
 @pytest.mark.parametrize("framework", ["pytest", "unittest"])
-def test_suite_de_un_paquete_pasa_sin_tocarla(paquete, framework):
-    """La suite vive en otro directorio: importa el paquete por su nombre completo desde su raíz."""
-    suite = paquete / "tests" / f"test_modelos_{framework}.py"
+def test_suite_for_a_package_passes_untouched(package, framework):
+    """The suite lives in another directory: it imports the package by its full name from its root."""
+    suite = package / "tests" / f"test_models_{framework}.py"
     generate = QATestGenerator.generate_pytest_suite if framework == "pytest" else QATestGenerator.generate_test_suite
-    generate(str(paquete / "pkg" / "modelos.py"), str(suite))
+    generate(str(package / "pkg" / "models.py"), str(suite))
     body = suite.read_text(encoding="utf-8")
 
-    assert "from pkg.modelos import (  # noqa: E402" in body
-    # Clases del módulo construidas con valores de su tipo, enums y métodos estáticos y de clase.
-    assert "cantidades([Item(\"alice\")])" in body and "pinta(list(Color)[0])" in body
-    assert "obj = Inventario([Item(\"alice\")])" in body and "Inventario.vacio()" in body
-    # open() se sustituye por un archivo vacío, no por un MagicMock que nunca termina de leerse.
+    assert "from pkg.models import (  # noqa: E402" in body
+    # Module classes built from values of their type, enums, and static and class methods.
+    assert "quantities([Item(\"alice\")])" in body and "paint(list(Color)[0])" in body
+    assert "obj = Inventory([Item(\"alice\")])" in body and "Inventory.empty()" in body
+    # open() is replaced by an empty file, not by a MagicMock that can never be read to the end.
     assert 'patch("builtins.open", new=mock_open(read_data=""))' in body
-    # main lee sys.argv: se omite con su motivo y no se importa.
-    assert "Lee sys.argv o termina el proceso" in body
+    # main reads sys.argv: it is skipped with its reason and not imported.
+    assert "It reads sys.argv or ends the process" in body
     assert "    main,\n" not in body
 
-    run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], paquete / "tests")
+    run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], package / "tests")
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_pytest_de_un_paquete_nombra_las_excepciones_del_modulo(paquete):
-    suite = paquete / "tests" / "test_modelos.py"
-    QATestGenerator.generate_pytest_suite(str(paquete / "pkg" / "modelos.py"), str(suite))
+def test_pytest_suite_for_a_package_names_the_modules_exceptions(package):
+    suite = package / "tests" / "test_models.py"
+    QATestGenerator.generate_pytest_suite(str(package / "pkg" / "models.py"), str(suite))
     body = suite.read_text(encoding="utf-8")
-    # La excepción de un helper privado y la de un módulo que importa el analizado.
-    assert "    ErrorDeValidacion,\n" in body and "    binascii,\n" in body
-    assert "except (ArithmeticError, AssertionError, ErrorDeValidacion, LookupError" in body
+    # The exception raised by a private helper, and one from a module the analysed module imports.
+    assert "    InvalidInputError,\n" in body and "    binascii,\n" in body
+    assert "except (ArithmeticError, AssertionError, InvalidInputError, LookupError" in body
     assert "LookupError, OSError, TypeError, ValueError, binascii.Error) as exc:" in body
-    # La propiedad se lee, no se llama, y una lista tipada varía su número de elementos.
+    # The property is read, not called, and a typed list varies its number of elements.
     assert "result = obj.total\n" in body
     assert 'ids=["empty_list", "single_elem", "two_elems"]' in body
-    # Si la función no llega a la E/S sustituida, el test de fallo de E/S se omite.
-    assert "Con los valores de ejemplo la función no llega a la E/S sustituida." in body
+    # When the function never reaches the patched I/O, the I/O failure test skips itself.
+    assert "With the sample values the function never reaches the patched I/O." in body
     assert "@pytest.fixture(autouse=True)\ndef _qa_isolation(monkeypatch):" in body
 
-    run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], paquete / "tests")
+    run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], package / "tests")
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "no llega a la E/S sustituida" in run.stdout
+    assert "never reaches the patched I/O" in run.stdout
 
 
-def test_suite_con_valores_supuestos_se_omite_si_no_encajan(tmp_path):
-    """Sin tipos ni pistas, el valor de x es un supuesto: si no le sirve a la función, se omite."""
-    src = tmp_path / "supuestos.py"
-    src.write_text("def usa(x):\n    return x.campo\n", encoding="utf-8")
-    suite = tmp_path / "test_supuestos.py"
+def test_suite_with_assumed_values_skips_when_they_do_not_fit(tmp_path):
+    """With no types or hints, the value of x is an assumption: if it does not suit the function, the test skips."""
+    src = tmp_path / "assumptions.py"
+    src.write_text("def uses(x):\n    return x.field\n", encoding="utf-8")
+    suite = tmp_path / "test_assumptions.py"
     QATestGenerator.generate_pytest_suite(str(src), str(suite))
     body = suite.read_text(encoding="utf-8")
-    assert "Valores de ejemplo supuestos para x" in body
+    assert "Assumed sample values for x" in body
     run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], tmp_path)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "no encajan con la función" in run.stdout
+    assert "do not fit the function" in run.stdout
 
 
-def test_suite_con_asserts_de_validacion_los_acepta_como_rechazo(tmp_path):
-    src = tmp_path / "validado.py"
-    # El valor nominal cumple la precondición y el límite -1 no: el assert sin texto es un rechazo válido.
-    src.write_text("def mitad(n: int) -> int:\n    assert n >= 0\n    return n // 2\n", encoding="utf-8")
-    suite = tmp_path / "test_validado.py"
+def test_suite_accepts_validation_asserts_as_a_rejection(tmp_path):
+    src = tmp_path / "validated.py"
+    # The nominal value meets the precondition and the -1 boundary does not: a message-less assert is a valid rejection.
+    src.write_text("def half(n: int) -> int:\n    assert n >= 0\n    return n // 2\n", encoding="utf-8")
+    suite = tmp_path / "test_validated.py"
     QATestGenerator.generate_pytest_suite(str(src), str(suite))
     body = suite.read_text(encoding="utf-8")
     assert "assert str(exc) or isinstance(exc, (AssertionError,))" in body
@@ -562,28 +561,28 @@ def test_suite_con_asserts_de_validacion_los_acepta_como_rechazo(tmp_path):
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-# --- Entrada inválida y valores límite -----------------------------------------------------------
+# --- Invalid input and boundary values -----------------------------------------------------------------
 
-@pytest.mark.parametrize("source, esperado", [
-    # Un raise bajo un if que menciona el parámetro, con su mensaje literal.
-    ("def f(porcentaje):\n    if porcentaje < 0:\n        raise ValueError('negativo')\n    return 1\n",
-     [("ValueError", "negativo")]),
-    # También en un elif, en orden de aparición, y con un assert.
-    ("def f(porcentaje):\n    assert porcentaje is not None\n    if porcentaje > 100:\n        raise ValueError('alto')\n"
-     "    elif porcentaje < 0:\n        raise KeyError()\n    return 1\n",
-     [("AssertionError", ""), ("ValueError", "alto"), ("KeyError", "")]),
-    ("def f(path):\n    assert path, 'ruta vacía'\n    return path\n", [("AssertionError", "ruta vacía")]),
-    # Un raise que depende de otra cosa no valida el parámetro.
-    ("def f(path, modo):\n    if modo == 'x':\n        raise RuntimeError('modo')\n    return path\n", []),
+@pytest.mark.parametrize("source, expected", [
+    # A raise under an if that mentions the parameter, with its literal message.
+    ("def f(percent):\n    if percent < 0:\n        raise ValueError('negative')\n    return 1\n",
+     [("ValueError", "negative")]),
+    # Also in an elif, in source order, and with an assert.
+    ("def f(percent):\n    assert percent is not None\n    if percent > 100:\n        raise ValueError('too high')\n"
+     "    elif percent < 0:\n        raise KeyError()\n    return 1\n",
+     [("AssertionError", ""), ("ValueError", "too high"), ("KeyError", "")]),
+    ("def f(path):\n    assert path, 'empty path'\n    return path\n", [("AssertionError", "empty path")]),
+    # A raise that depends on something else does not validate the parameter.
+    ("def f(path, mode):\n    if mode == 'x':\n        raise RuntimeError('mode')\n    return path\n", []),
     ("def f(path):\n    return path\n", []),
 ])
-def test_excepciones_con_las_que_la_funcion_valida_un_parametro(source, esperado):
+def test_exceptions_the_function_uses_to_validate_a_parameter(source, expected):
     func = _func(source)
-    nombre = func.args.args[0].arg
-    assert ai.validating_raises(func, nombre) == esperado
+    name = func.args.args[0].arg
+    assert ai.validating_raises(func, name) == expected
 
 
-def _suites(tmp_path, source, name="validado"):
+def _suites(tmp_path, source, name="validated"):
     src = tmp_path / f"{name}.py"
     src.write_text(textwrap.dedent(source), encoding="utf-8")
     unit, py = tmp_path / f"test_{name}_unit.py", tmp_path / f"test_{name}_pytest.py"
@@ -593,153 +592,153 @@ def _suites(tmp_path, source, name="validado"):
     return unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8"), run
 
 
-def test_entrada_invalida_solo_si_la_funcion_valida_ese_parametro(tmp_path):
-    """walk_files("../../etc/passwd") recorre una ruta relativa: exigirle una excepción sería un error."""
+def test_invalid_input_only_when_the_function_validates_that_parameter(tmp_path):
+    """walk_files("../../etc/passwd") walks a relative path: demanding an exception from it would be wrong."""
     unit, py, run = _suites(tmp_path, '''
         import os
 
-        def recorre(path):
+        def walk(path):
             return sorted(os.listdir(path)) if os.path.isdir(path) else []
 
-        def descuento(precio, porcentaje):
-            if porcentaje < 0 or porcentaje > 100:
-                raise ValueError("porcentaje fuera de rango")
-            return precio - precio * porcentaje / 100
+        def discount(price, percent):
+            if percent < 0 or percent > 100:
+                raise ValueError("percent out of range")
+            return price - price * percent / 100
     ''')
-    assert "test_recorre_invalid_input" not in unit and "test_recorre_adversarial_raises" not in py
-    assert 'with self.assertRaisesRegex(ValueError, r"porcentaje\\ fuera\\ de\\ rango"):' in unit
-    assert 'with pytest.raises(ValueError, match=r"porcentaje\\ fuera\\ de\\ rango"):' in py
+    assert "test_walk_invalid_input" not in unit and "test_walk_adversarial_raises" not in py
+    assert 'with self.assertRaisesRegex(ValueError, r"percent\\ out\\ of\\ range"):' in unit
+    assert 'with pytest.raises(ValueError, match=r"percent\\ out\\ of\\ range"):' in py
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_entrada_invalida_con_varias_validaciones_acepta_cualquiera(tmp_path):
+def test_invalid_input_with_several_validations_accepts_any_of_them(tmp_path):
     unit, py, run = _suites(tmp_path, '''
-        def cobra(email):
+        def charge(email):
             if "@" not in email:
-                raise ValueError("sin arroba")
+                raise ValueError("missing at sign")
             if email.endswith("."):
-                raise TypeError("dominio incompleto")
+                raise TypeError("incomplete domain")
             return email
     ''')
-    assert "with self.assertRaisesRegex((ValueError, TypeError), 'sin\\\\ arroba|dominio\\\\ incompleto'):" in unit
+    assert "with self.assertRaisesRegex((ValueError, TypeError), 'missing\\\\ at\\\\ sign|incomplete\\\\ domain'):" in unit
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_valores_limite_de_una_ruta_aceptan_oserror(tmp_path):
-    """"" no existe y 2.048 caracteres son un nombre demasiado largo: los dos son rechazos válidos."""
+def test_boundary_values_of_a_path_accept_oserror(tmp_path):
+    """"" does not exist and 2,048 characters is too long a name: both are valid rejections."""
     _, py, run = _suites(tmp_path, '''
         import os
 
-        def tamano(path: str) -> int:
+        def file_size(path: str) -> int:
             if path.startswith("/tmp/"):
                 return 0
             return os.stat(path).st_size
-    ''', name="rutas")
+    ''', name="paths")
     assert "LookupError, OSError, TypeError, ValueError) as exc:" in py
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-# --- Tests que nunca se cuelgan ------------------------------------------------------------------
+# --- Tests that never hang -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("source, esperado", [
+@pytest.mark.parametrize("source, expected", [
     ("def f():\n    while True:\n        tick()\n", True),
-    # Dentro de un try: solo lo para Ctrl+C.
+    # Inside a try: only Ctrl+C stops it.
     ("def f():\n    try:\n        while True:\n            tick()\n    except KeyboardInterrupt:\n        return 1\n", True),
-    # Un break en un bucle interior no sale del exterior.
+    # A break in an inner loop does not leave the outer one.
     ("def f():\n    while True:\n        for x in y:\n            break\n", True),
-    ("def f():\n    while True:\n        if listo():\n            break\n", False),
-    ("def f():\n    while True:\n        if listo():\n            return 1\n", False),
+    ("def f():\n    while True:\n        if ready():\n            break\n", False),
+    ("def f():\n    while True:\n        if ready():\n            return 1\n", False),
     ("def f():\n    while 1:\n        sys.exit(0)\n", False),
-    # Solo si se llega siempre: aquí depende del argumento.
-    ("def f(continuo):\n    if not continuo:\n        return 0\n    while True:\n        tick()\n", False),
-    # Un generador infinito no hace nada al llamarlo.
+    # Only when it is always reached: here it depends on the argument.
+    ("def f(continuous):\n    if not continuous:\n        return 0\n    while True:\n        tick()\n", False),
+    # Calling an infinite generator does nothing.
     ("def f():\n    while True:\n        yield 1\n", False),
 ])
-def test_bucle_sin_fin(source, esperado):
-    assert ai.has_endless_loop(_func(source)) is esperado
+def test_endless_loop(source, expected):
+    assert ai.has_endless_loop(_func(source)) is expected
 
 
-def test_parametros_que_son_una_duracion():
+def test_parameters_that_are_a_duration():
     func = _func(
-        "def f(interval_minutes, espera, tope, seconds, nombre, items):\n"
+        "def f(interval_minutes, pause, cap, seconds, target, items):\n"
         "    time.sleep(interval_minutes * 60)\n"
-        "    evento.wait(espera)\n"
-        "    requests.get(nombre, timeout=tope)\n"
+        "    event.wait(pause)\n"
+        "    requests.get(target, timeout=cap)\n"
         "    return ', '.join(items)\n"
     )
-    assert ai.duration_params(func) == {"interval_minutes", "espera", "tope", "seconds"}
+    assert ai.duration_params(func) == {"interval_minutes", "pause", "cap", "seconds"}
 
 
-@pytest.mark.parametrize("source, llamadas", [
-    # Una validación no corta: con un valor válido no se dispara.
-    ("def f(url):\n    if not url:\n        raise ValueError('x')\n    return abrir(url).leer()\n", ["leer", "abrir"]),
-    # Un return en una rama sí.
+@pytest.mark.parametrize("source, calls", [
+    # A validation does not cut the walk: a valid value never triggers it.
+    ("def f(url):\n    if not url:\n        raise ValueError('x')\n    return fetch(url).read()\n", ["read", "fetch"]),
+    # A return in a branch does.
     ("def f(x):\n    a()\n    if x:\n        return 0\n    b()\n", ["a"]),
-    # Dentro de un with o de un try se sigue; lo de un if o un and puede no ejecutarse.
-    ("def f(x):\n    with abrir(x) as h:\n        try:\n            h.leer()\n        except OSError:\n            c()\n"
-     "    if x:\n        d()\n    x and e()\n", ["abrir", "leer"]),
+    # The walk continues into with blocks and try bodies; whatever sits behind an if or an and may not run.
+    ("def f(x):\n    with fetch(x) as h:\n        try:\n            h.read()\n        except OSError:\n            c()\n"
+     "    if x:\n        d()\n    x and e()\n", ["fetch", "read"]),
 ])
-def test_llamadas_que_siempre_se_alcanzan(source, llamadas):
-    calls = ai.always_reached_calls(_func(source))
-    assert sorted(c.func.attr if isinstance(c.func, ast.Attribute) else c.func.id for c in calls) == sorted(llamadas)
+def test_calls_that_are_always_reached(source, calls):
+    found = ai.always_reached_calls(_func(source))
+    assert sorted(c.func.attr if isinstance(c.func, ast.Attribute) else c.func.id for c in found) == sorted(calls)
 
 
-def test_e_s_siempre_alcanzada_a_traves_de_helpers(tmp_path):
+def test_io_always_reached_through_helpers(tmp_path):
     src = tmp_path / "m.py"
     src.write_text(textwrap.dedent('''
         import os
         import requests
 
-        def _publica(token, texto):
+        def _post(token, text):
             if not token:
                 return
-            requests.post("https://api.example.com", json={"t": texto}, timeout=5)
+            requests.post("https://api.example.com", json={"t": text}, timeout=5)
 
-        def _borra(ruta):
-            os.remove(ruta)
+        def _delete(file_path):
+            os.remove(file_path)
 
-        def avisa(texto, ajustes):
-            _publica(ajustes.get("token"), texto)
+        def notify(text, settings):
+            _post(settings.get("token"), text)
 
-        def limpia(ruta):
-            _borra(ruta)
+        def clean(file_path):
+            _delete(file_path)
             return True
     '''), encoding="utf-8")
     visitor = ai.UnitTestGenerator(str(src))
     visitor.visit(ast.parse(src.read_text(encoding="utf-8")))
-    # avisa llama siempre a _publica, pero _publica solo publica si hay token.
-    assert visitor.function_meta["avisa"]["io_calls"] and not visitor.function_meta["avisa"]["io_always"]
-    assert visitor.function_meta["limpia"]["io_always"]
+    # notify always calls _post, but _post only posts when there is a token.
+    assert visitor.function_meta["notify"]["io_calls"] and not visitor.function_meta["notify"]["io_always"]
+    assert visitor.function_meta["clean"]["io_always"]
 
 
-def test_suite_de_funciones_que_esperan_o_no_terminan(tmp_path):
-    """El bucle sin fin se omite sin ejecutarlo y la duración no recibe 10**6 segundos."""
+def test_suite_for_functions_that_wait_or_never_finish(tmp_path):
+    """The endless loop is skipped without running it, and the duration never receives 10**6 seconds."""
     unit, py, run = _suites(tmp_path, '''
         import time
 
-        def vigila():
+        def watch():
             while True:
                 time.sleep(60)
 
-        def pausa(seconds: float) -> None:
+        def pause(seconds: float) -> None:
             time.sleep(seconds)
-    ''', name="esperas")
-    assert "Entra en un bucle sin fin" in py and "Entra en un bucle sin fin" in unit
+    ''', name="waits")
+    assert "It enters an endless loop" in py and "It enters an endless loop" in unit
     assert 'ids=["zero", "negative_one"]' in py
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_limite_de_tiempo_de_cada_test_generado(tmp_path):
-    """Lo que el análisis no ve también termina: se omite y, si el código se traga la omisión, se corta."""
-    src = tmp_path / "bloquea.py"
+def test_time_limit_of_every_generated_test(tmp_path):
+    """Whatever the analysis cannot see still ends: it is skipped and, if the code swallows the skip, stopped."""
+    src = tmp_path / "blocks.py"
     src.write_text(textwrap.dedent('''
         import threading
         import time
 
-        def espera():
+        def wait():
             threading.Event().wait()
 
-        def terco(n: int = 0):
+        def stubborn(n: int = 0):
             while n >= 0:
                 try:
                     time.sleep(0.05)
@@ -748,33 +747,33 @@ def test_limite_de_tiempo_de_cada_test_generado(tmp_path):
     '''), encoding="utf-8")
     for framework, generate in (("pytest", QATestGenerator.generate_pytest_suite),
                                 ("unit", QATestGenerator.generate_test_suite)):
-        suite = tmp_path / f"test_bloquea_{framework}.py"
+        suite = tmp_path / f"test_blocks_{framework}.py"
         generate(str(src), str(suite))
         suite.write_text(suite.read_text(encoding="utf-8").replace("_QA_TIMEOUT = 10", "_QA_TIMEOUT = 1"),
                          encoding="utf-8")
         run = _run(["pytest", "-q", "-rs", "-p", "no:cacheprovider", suite.name], tmp_path)
-        assert "No terminó en 1 s con los valores de ejemplo" in run.stdout, run.stdout + run.stderr
+        assert "Did not finish within 1 s with the sample values" in run.stdout, run.stdout + run.stderr
         if framework == "pytest":
-            # pytest.skip no deriva de Exception: el except del bucle no la atrapa.
+            # pytest.skip does not derive from Exception, so the loop's except cannot catch it.
             assert run.returncode == 0 and "2 skipped" in run.stdout, run.stdout
         else:
-            # self.skipTest sí: el bucle se la traga y a los dos segundos lo corta _QaTimeout.
+            # self.skipTest does: the loop swallows it and _QaTimeout stops it two seconds later.
             assert "_QaTimeout" in run.stdout and "1 failed, 1 skipped" in run.stdout, run.stdout
 
 
-def test_una_funcion_de_ejemplo_como_argumento_no_permite_afirmar_el_valor(tmp_path):
-    """interruptible(call) devuelve call(), y la función de ejemplo devuelve None."""
+def test_a_sample_callable_argument_prevents_asserting_the_value(tmp_path):
+    """interruptible(call) returns call(), and the sample callable returns None."""
     unit, py, run = _suites(tmp_path, '''
         from typing import Callable
 
-        def corre(call: Callable[[], int]) -> int:
+        def run_it(call: Callable[[], int]) -> int:
             return call()
-    ''', name="corre")
+    ''', name="runs")
     assert "assert isinstance(result, int)" not in py and "assertIsInstance(result, int)" not in unit
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-# --- Índice de imports, clases con choque de nombres y componentes de interfaz -------------------
+# --- Import index, classes with clashing names and UI components ------------------------------------
 
 def _write_package(root, files):
     for rel, content in files.items():
@@ -794,14 +793,14 @@ def _package_suites(root, src):
     return unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8"), run
 
 
-def test_indice_resuelve_rutas_arboles_e_imports_del_proyecto(tmp_path):
-    """ProjectIndex localiza módulos del paquete, sigue imports relativos y tolera archivos rotos."""
+def test_index_resolves_paths_trees_and_project_imports(tmp_path):
+    """ProjectIndex finds the package's modules, follows relative imports and tolerates broken files."""
     _write_package(tmp_path, {
         "pkg/__init__.py": "",
         "pkg/core.py": "class Base:\n    pass\n",
         "pkg/sub/__init__.py": "from .util import helper\nfrom ..core import Base\n",
         "pkg/sub/util.py": "def helper():\n    return 1\n",
-        "pkg/sub/roto.py": "def (\n",
+        "pkg/sub/broken.py": "def (\n",
         "pkg/sub/mod.py": '''
             import json as js
             import pkg.core
@@ -809,20 +808,20 @@ def test_indice_resuelve_rutas_arboles_e_imports_del_proyecto(tmp_path):
             from typing import TYPE_CHECKING
 
             from . import util
-            from .util import helper as ayuda
+            from .util import helper as assist
             from .util import *
             from ..core import Base
-            from pkg.core import Base as BaseAbs
+            from pkg.core import Base as AbsoluteBase
 
             if TYPE_CHECKING:
-                from .util import solo_tipos
+                from .util import types_only
             else:
                 from .. import core as core_else
 
             try:
-                from .roto import algo
+                from .broken import something
             except ImportError:
-                from .util import respaldo
+                from .util import fallback
         ''',
     })
 
@@ -831,22 +830,22 @@ def test_indice_resuelve_rutas_arboles_e_imports_del_proyecto(tmp_path):
     assert (idx.module, idx.root) == ("pkg.sub.mod", str(tmp_path))
     assert idx.path_of("pkg.sub.mod") == str(mod_path)
     assert idx.path_of("pkg.sub") == str(tmp_path / "pkg" / "sub" / "__init__.py")
-    assert idx.path_of("json") is None and idx.path_of("pkg.inexistente") is None
+    assert idx.path_of("json") is None and idx.path_of("pkg.missing") is None
 
-    # Caché de árboles y tolerancia a sintaxis inválida o módulos fuera del proyecto.
+    # Tree cache, and tolerance of invalid syntax or modules outside the project.
     util_tree = idx.tree("pkg.sub.util")
     assert util_tree is not None and idx.tree("pkg.sub.util") is util_tree
-    assert idx.tree("pkg.sub.roto") is None and idx.tree("json") is None
+    assert idx.tree("pkg.sub.broken") is None and idx.tree("json") is None
 
-    # Imports relativos y absolutos desde un módulo y desde __init__.py, incluidos if y try.
+    # Relative and absolute imports from a module and from __init__.py, inside if and try included.
     names, modules = idx.imports_of("pkg.sub.mod")
     assert names == {
-        "ayuda": ("pkg.sub.util", "helper"),
+        "assist": ("pkg.sub.util", "helper"),
         "Base": ("pkg.core", "Base"),
-        "BaseAbs": ("pkg.core", "Base"),
-        "solo_tipos": ("pkg.sub.util", "solo_tipos"),
-        "algo": ("pkg.sub.roto", "algo"),
-        "respaldo": ("pkg.sub.util", "respaldo"),
+        "AbsoluteBase": ("pkg.core", "Base"),
+        "types_only": ("pkg.sub.util", "types_only"),
+        "something": ("pkg.sub.broken", "something"),
+        "fallback": ("pkg.sub.util", "fallback"),
     }
     assert modules == {
         "core_alias": "pkg.core",
@@ -857,113 +856,113 @@ def test_indice_resuelve_rutas_arboles_e_imports_del_proyecto(tmp_path):
     assert pkg_names == {"helper": ("pkg.sub.util", "helper"), "Base": ("pkg.core", "Base")}
     assert pkg_modules == {}
 
-    # Un módulo roto o en curso de carga no provoca errores ni recursión infinita.
-    assert idx.visitor("pkg.sub.roto") is None
-    assert idx.function_io("pkg.sub.roto", "algo") == (set(), False)
+    # A broken module, or one that is still loading, causes neither errors nor infinite recursion.
+    assert idx.visitor("pkg.sub.broken") is None
+    assert idx.function_io("pkg.sub.broken", "something") == (set(), False)
     with idx.loading("pkg.sub.util"):
         assert idx.visitor("pkg.sub.util") is None
     assert idx.visitor("pkg.sub.util") is not None
 
 
-def test_construccion_de_clases_importadas_de_otros_modulos(tmp_path):
-    """Los parámetros de una clase importada se resuelven en su módulo y los objetivos omitidos no dejan imports."""
+def test_constructing_classes_imported_from_other_modules(tmp_path):
+    """An imported class's parameters are resolved in its own module, and skipped targets leave no imports."""
     _write_package(tmp_path, {
         "pkg/__init__.py": "",
         "pkg/base.py": '''
             from dataclasses import dataclass
             from enum import Enum
 
-            class Modo(Enum):
-                RAPIDO = "rapido"
+            class Mode(Enum):
+                FAST = "fast"
 
             @dataclass
             class Spec:
-                nombre: str
-                modo: Modo
+                name: str
+                mode: Mode
 
             @dataclass
-            class Etiqueta:
-                texto: str
+            class Label:
+                caption: str
         ''',
         "pkg/extra.py": '''
             from dataclasses import dataclass
             from enum import Enum
 
-            class Sello(Enum):
+            class Seal(Enum):
                 OK = 1
 
             @dataclass
-            class Sobre:
-                sello: Sello
+            class Envelope:
+                seal: Seal
         ''',
-        "pkg/servicio.py": '''
+        "pkg/service.py": '''
             from __future__ import annotations
             from typing import Type
 
-            from .base import Etiqueta as Tag, Spec
-            from .extra import Sobre
+            from .base import Label as Tag, Spec
+            from .extra import Envelope
 
             def describe(spec: Spec) -> str:
-                return f"{spec.nombre}:{spec.modo.value}"
+                return f"{spec.name}:{spec.mode.value}"
 
-            def nombre_clase(cls: Type[Spec]) -> str:
+            def class_name(cls: Type[Spec]) -> str:
                 return cls.__name__
 
-            def lee_tag(tag: Tag) -> str:
-                return tag.texto
+            def read_tag(tag: Tag) -> str:
+                return tag.caption
 
-            def no_construible(sobre: Sobre, raro: Desconocido) -> str:
-                return str(sobre)
+            def not_buildable(envelope: Envelope, odd: Unknown) -> str:
+                return str(envelope)
         ''',
     })
 
-    unit, py, run = _package_suites(tmp_path, tmp_path / "pkg" / "servicio.py")
+    unit, py, run = _package_suites(tmp_path, tmp_path / "pkg" / "service.py")
     for body in (unit, py):
-        assert "from pkg.servicio import Spec, describe, lee_tag, nombre_clase  # noqa: E402" in body
-        assert "from pkg.base import Etiqueta, Modo  # noqa: E402" in body
-        assert 'describe(Spec("alice", list(Modo)[0]))' in body
-        assert "nombre_clase(Spec)" in body
-        assert 'lee_tag(Etiqueta("sample"))' in body
-        assert "pkg.extra" not in body and "Sello" not in body
+        assert "from pkg.service import Spec, class_name, describe, read_tag  # noqa: E402" in body
+        assert "from pkg.base import Label, Mode  # noqa: E402" in body
+        assert 'describe(Spec("alice", list(Mode)[0]))' in body
+        assert "class_name(Spec)" in body
+        assert 'read_tag(Label("sample"))' in body
+        assert "pkg.extra" not in body and "Seal" not in body
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_clases_con_choque_de_nombres_no_se_mezclan_ni_rompen_la_suite(tmp_path):
-    """Si una clase de otro módulo choca con un nombre local o con otra clase homónima, el objetivo se omite."""
+def test_classes_with_clashing_names_are_not_mixed_up_and_do_not_break_the_suite(tmp_path):
+    """When a class from another module clashes with a local name or another class of the same name, the target is skipped."""
     _write_package(tmp_path, {
         "pkg/__init__.py": "",
-        "pkg/modelos.py": '''
+        "pkg/models.py": '''
             from dataclasses import dataclass
             from enum import Enum
 
-            class Estado(Enum):
-                ACTIVO = "activo"
+            class State(Enum):
+                ACTIVE = "active"
 
             @dataclass
-            class Orden:
-                estado: Estado
+            class Order:
+                state: State
         ''',
-        "pkg/servicio.py": '''
-            from .modelos import Estado as EstadoOrden, Orden
+        "pkg/service.py": '''
+            from .models import State as OrderState, Order
 
-            class Estado:
-                def etiqueta(self) -> str:
+            class State:
+                def label(self) -> str:
                     return "local"
 
-            class Gestor:
-                def __init__(self, orden: Orden):
-                    self.orden = orden
+            class Manager:
+                def __init__(self, order: Order):
+                    self.order = order
 
-                def actual(self) -> str:
-                    return self.orden.estado.value
+                def current(self) -> str:
+                    return self.order.state.value
 
-            def procesa(orden: Orden) -> str:
-                return orden.estado.value
+            def process(order: Order) -> str:
+                return order.state.value
 
-            def muestra(estado: EstadoOrden) -> str:
-                return estado.value
+            def show(state: OrderState) -> str:
+                return state.value
         ''',
-        "pkg/alfa.py": '''
+        "pkg/alpha.py": '''
             from dataclasses import dataclass
             from enum import Enum
 
@@ -971,7 +970,7 @@ def test_clases_con_choque_de_nombres_no_se_mezclan_ni_rompen_la_suite(tmp_path)
                 A = "a"
 
             @dataclass
-            class TareaA:
+            class TaskA:
                 cfg: Config
         ''',
         "pkg/beta.py": '''
@@ -982,73 +981,73 @@ def test_clases_con_choque_de_nombres_no_se_mezclan_ni_rompen_la_suite(tmp_path)
                 B = "b"
 
             @dataclass
-            class TareaB:
+            class TaskB:
                 cfg: Config
         ''',
-        "pkg/orquestador.py": '''
-            from .alfa import TareaA
-            from .beta import TareaB
+        "pkg/coordinator.py": '''
+            from .alpha import TaskA
+            from .beta import TaskB
 
-            def corre_a(tarea: TareaA) -> str:
-                return tarea.cfg.value
+            def run_a(task: TaskA) -> str:
+                return task.cfg.value
 
-            def otra_a(tarea: TareaA) -> str:
-                return tarea.cfg.name
+            def other_a(task: TaskA) -> str:
+                return task.cfg.name
 
-            def corre_b(tarea: TareaB) -> str:
-                return tarea.cfg.value
+            def run_b(task: TaskB) -> str:
+                return task.cfg.value
         ''',
-        "pkg/ciclo_a.py": "from .ciclo_b import B\n\nclass A(B):\n    pass\n",
-        "pkg/ciclo_b.py": "from .ciclo_a import A\n\nclass B(A):\n    pass\n",
+        "pkg/cycle_a.py": "from .cycle_b import B\n\nclass A(B):\n    pass\n",
+        "pkg/cycle_b.py": "from .cycle_a import A\n\nclass B(A):\n    pass\n",
     })
 
-    # Choque con un nombre local del módulo analizado (Estado): ni procesa ni Gestor se construyen.
-    servicio = tmp_path / "pkg" / "servicio.py"
-    idx_servicio = ProjectIndex(str(servicio))
-    ctx_servicio = cp.SampleContext(idx_servicio.tree("pkg.servicio"), idx_servicio)
-    assert cp.instantiation_for("Gestor", ctx_servicio) == (
+    # Clash with a local name of the analysed module (State): neither process nor Manager can be built.
+    service = tmp_path / "pkg" / "service.py"
+    idx_service = ProjectIndex(str(service))
+    ctx_service = cp.SampleContext(idx_service.tree("pkg.service"), idx_service)
+    assert cp.instantiation_for("Manager", ctx_service) == (
         None,
-        "No se sabe construir Gestor: complétalo a mano con valores válidos.",
+        "Cannot work out how to construct Manager: fill it in by hand with valid values.",
     )
 
-    unit_s, py_s, run_s = _package_suites(tmp_path, servicio)
+    unit_s, py_s, run_s = _package_suites(tmp_path, service)
     for body in (unit_s, py_s):
-        assert "from pkg.modelos import Estado" not in body
-        assert "Falta un valor de ejemplo para orden (Orden): complétalo a mano." in body
-        assert "Falta un valor de ejemplo para estado (EstadoOrden): complétalo a mano." in body
-        assert "No se sabe construir Gestor: complétalo a mano con valores válidos." in body
+        assert "from pkg.models import State" not in body
+        assert "No sample value for order (Order): fill it in by hand." in body
+        assert "No sample value for state (OrderState): fill it in by hand." in body
+        assert "Cannot work out how to construct Manager: fill it in by hand with valid values." in body
     assert run_s.returncode == 0, run_s.stdout + run_s.stderr
 
-    # Choque entre dos clases homónimas de módulos ajenos (alfa.Config y beta.Config): el primero entra,
-    # reutilizar el mismo módulo sigue valiendo y el segundo se omite sin pisar al primero.
-    unit_o, py_o, run_o = _package_suites(tmp_path, tmp_path / "pkg" / "orquestador.py")
+    # Clash between two same-named classes from other modules (alpha.Config and beta.Config): the first
+    # one is used, reusing the same module keeps working, and the second is skipped without replacing it.
+    unit_o, py_o, run_o = _package_suites(tmp_path, tmp_path / "pkg" / "coordinator.py")
     for body in (unit_o, py_o):
-        assert "from pkg.alfa import Config  # noqa: E402" in body
+        assert "from pkg.alpha import Config  # noqa: E402" in body
         assert "from pkg.beta import Config" not in body
-        assert "corre_a(TareaA(list(Config)[0]))" in body
-        assert "otra_a(TareaA(list(Config)[0]))" in body
-        assert "Falta un valor de ejemplo para tarea (TareaB): complétalo a mano." in body
+        assert "run_a(TaskA(list(Config)[0]))" in body
+        assert "other_a(TaskA(list(Config)[0]))" in body
+        assert "No sample value for task (TaskB): fill it in by hand." in body
     assert run_o.returncode == 0, run_o.stdout + run_o.stderr
 
-    # Imports circulares entre contextos hijos no entran en bucle.
-    ciclo_a = tmp_path / "pkg" / "ciclo_a.py"
-    idx_ciclo = ProjectIndex(str(ciclo_a))
-    ctx_ciclo = cp.SampleContext(idx_ciclo.tree("pkg.ciclo_a"), idx_ciclo)
-    assert ctx_ciclo.child("pkg.ciclo_a") is ctx_ciclo
-    child_b = ctx_ciclo.child("pkg.ciclo_b")
-    assert child_b is not None and ctx_ciclo.child("pkg.ciclo_b") is child_b
-    found_b = ctx_ciclo.lookup("B")
+    # Circular imports between child contexts do not loop.
+    cycle_a = tmp_path / "pkg" / "cycle_a.py"
+    idx_cycle = ProjectIndex(str(cycle_a))
+    ctx_cycle = cp.SampleContext(idx_cycle.tree("pkg.cycle_a"), idx_cycle)
+    assert ctx_cycle.child("pkg.cycle_a") is ctx_cycle
+    child_b = ctx_cycle.child("pkg.cycle_b")
+    assert child_b is not None and ctx_cycle.child("pkg.cycle_b") is child_b
+    found_b = ctx_cycle.lookup("B")
     assert found_b is not None and found_b[1].name == "B"
 
 
-def test_deteccion_de_componentes_de_interfaz_directos_genericos_y_heredados(tmp_path):
-    """Reconoce componentes de frameworks de interfaz: genéricos, con alias, dentro de if/try y heredados."""
+def test_detecting_direct_generic_and_inherited_ui_components(tmp_path):
+    """UI framework components are recognised: generic, aliased, inside if/try and inherited."""
     ctx = _ctx('''
         from typing import TYPE_CHECKING
         import tkinter
         import tkinter as tk
         from textual.screen import ModalScreen
-        from .textual import Falso
+        from .textual import Fake
 
         if TYPE_CHECKING:
             from PyQt6.QtWidgets import QWidget
@@ -1059,71 +1058,71 @@ def test_deteccion_de_componentes_de_interfaz_directos_genericos_y_heredados(tmp
             class Frame:
                 pass
 
-        class Dialogo(ModalScreen[bool]):
+        class Dialog(ModalScreen[bool]):
             def compose(self): ...
             @staticmethod
-            def ayuda(): ...
+            def assist(): ...
 
-        class SubDialogo(Dialogo):
-            def cierra(self): ...
+        class SubDialog(Dialog):
+            def close(self): ...
 
         class Panel(tk.Frame):
-            def dibuja(self): ...
+            def draw(self): ...
 
-        class Boton(tkinter.Button):
-            def pulsa(self): ...
+        class PushButton(tkinter.Button):
+            def press(self): ...
 
-        class Ventana(QWidget):
-            def muestra(self): ...
+        class Window(QWidget):
+            def show(self): ...
 
-        class Marco(Frame):
-            def abre(self): ...
+        class Border(Frame):
+            def open_it(self): ...
 
-        class Normal(Falso):
-            def hace(self): ...
+        class Plain(Fake):
+            def do(self): ...
     ''')
-    assert ctx.classes["Dialogo"].ui == "Textual"
-    assert ctx.classes["SubDialogo"].ui == "Textual"
+    assert ctx.classes["Dialog"].ui == "Textual"
+    assert ctx.classes["SubDialog"].ui == "Textual"
     assert ctx.classes["Panel"].ui == "Tkinter"
-    assert ctx.classes["Boton"].ui == "Tkinter"
-    assert ctx.classes["Ventana"].ui == "Qt"
-    assert ctx.classes["Marco"].ui == "wxPython"
-    assert ctx.classes["Normal"].ui == ""
+    assert ctx.classes["PushButton"].ui == "Tkinter"
+    assert ctx.classes["Window"].ui == "Qt"
+    assert ctx.classes["Border"].ui == "wxPython"
+    assert ctx.classes["Plain"].ui == ""
 
-    for method in ("compose", "ayuda"):
-        rec = cp.receiver_for("Dialogo", method, ctx)
+    for method in ("compose", "assist"):
+        rec = cp.receiver_for("Dialog", method, ctx)
         assert rec.setup is None
-        assert rec.skip == ("Es un componente de interfaz de Textual: necesita la aplicación en marcha. "
-                            "Pruébalo con las herramientas del framework (en Textual, App.run_test()).")
+        assert rec.skip == ("It is a Textual UI component: it needs the application running. "
+                            "Test it with the framework's own tools (in Textual, App.run_test()).")
 
-    # Herencia de un componente definido en otro módulo del proyecto.
+    # Inheriting from a component defined in another project module.
     _write_package(tmp_path, {
         "pkg/__init__.py": "",
         "pkg/base_ui.py": '''
             from textual.screen import Screen
 
-            class PantallaBase(Screen):
+            class BaseScreen(Screen):
                 pass
         ''',
-        "pkg/vistas.py": '''
-            from .base_ui import PantallaBase
+        "pkg/views.py": '''
+            from .base_ui import BaseScreen
 
-            class SubVista(Vista):
+            class SubView(View):
                 pass
 
-            class Vista(PantallaBase):
+            class View(BaseScreen):
                 def on_mount(self): ...
         ''',
     })
-    vistas = tmp_path / "pkg" / "vistas.py"
-    idx = ProjectIndex(str(vistas))
-    ctx_vistas = cp.SampleContext(idx.tree("pkg.vistas"), idx)
-    assert ctx_vistas.classes["Vista"].ui == "Textual"
-    assert ctx_vistas.classes["SubVista"].ui == "Textual"
+    views = tmp_path / "pkg" / "views.py"
+    idx = ProjectIndex(str(views))
+    ctx_views = cp.SampleContext(idx.tree("pkg.views"), idx)
+    assert ctx_views.classes["View"].ui == "Textual"
+    assert ctx_views.classes["SubView"].ui == "Textual"
 
 
-def test_suite_omite_los_metodos_de_componentes_de_interfaz(tmp_path):
-    """Los métodos y propiedades de un componente de interfaz se omiten con motivo y el resto se prueba."""
+def test_suite_skips_methods_of_ui_components(tmp_path):
+    """Methods and properties of a UI component are skipped with a reason; everything else is tested."""
     _write_package(tmp_path, {
         "pkg/__init__.py": "",
         "pkg/base_ui.py": '''
@@ -1135,31 +1134,31 @@ def test_suite_omite_los_metodos_de_componentes_de_interfaz(tmp_path):
                         return cls
 
 
-            class PantallaBase(ModalScreen[bool]):
+            class BaseScreen(ModalScreen[bool]):
                 pass
         ''',
-        "pkg/vistas.py": '''
-            from .base_ui import PantallaBase
+        "pkg/views.py": '''
+            from .base_ui import BaseScreen
 
 
-            class DialogoConfirmacion(PantallaBase):
+            class ConfirmDialog(BaseScreen):
                 def on_mount(self) -> None:
-                    raise RuntimeError("sin pantalla montada")
+                    raise RuntimeError("no mounted screen")
 
                 @property
-                def titulo(self) -> str:
-                    raise RuntimeError("sin pantalla montada")
+                def heading(self) -> str:
+                    raise RuntimeError("no mounted screen")
 
 
-            def formatea(texto: str) -> str:
-                return texto.strip().upper()
+            def format_value(value: str) -> str:
+                return value.strip().upper()
         ''',
     })
 
-    unit, py, run = _package_suites(tmp_path, tmp_path / "pkg" / "vistas.py")
+    unit, py, run = _package_suites(tmp_path, tmp_path / "pkg" / "views.py")
     for body in (unit, py):
-        assert "Es un componente de interfaz de Textual: necesita la aplicación en marcha." in body
-        assert "from pkg.vistas import formatea  # noqa: E402" in body
-        assert "DialogoConfirmacion," not in body
+        assert "It is a Textual UI component: it needs the application running." in body
+        assert "from pkg.views import format_value  # noqa: E402" in body
+        assert "ConfirmDialog," not in body
     assert run.returncode == 0, run.stdout + run.stderr
-    assert "Es un componente de interfaz de Textual" in run.stdout
+    assert "It is a Textual UI component" in run.stdout

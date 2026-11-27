@@ -16,6 +16,7 @@ _TIMEOUT_EXC_NAMES = frozenset({"TimeoutError", "asyncio.TimeoutError", "Cancell
 
 
 def _chain(node: ast.AST) -> str:
+    """Dotted name of a Name/Attribute chain ("mock.patch.object"), or "" for anything else."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -25,6 +26,7 @@ def _chain(node: ast.AST) -> str:
 
 
 def _is_generic_exc(arg: ast.AST) -> bool:
+    """True for Exception or BaseException, alone or inside a tuple."""
     if isinstance(arg, ast.Name):
         return arg.id in ("Exception", "BaseException")
     if isinstance(arg, ast.Tuple):
@@ -33,6 +35,7 @@ def _is_generic_exc(arg: ast.AST) -> bool:
 
 
 def _is_timeout_exc_arg(arg: ast.AST) -> bool:
+    """True for timeout/cancellation exceptions, whose messages are not worth matching."""
     if isinstance(arg, (ast.Name, ast.Attribute)):
         return _chain(arg) in _TIMEOUT_EXC_NAMES
     if isinstance(arg, ast.Tuple):
@@ -41,7 +44,7 @@ def _is_timeout_exc_arg(arg: ast.AST) -> bool:
 
 
 def _has_isolation_context(func_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
-    """Indica si el test usa fixtures/mocks de aislamiento."""
+    """True when the test isolates itself: monkeypatch/mocker fixtures, patch decorators or mock objects."""
     for arg in func_node.args.args:
         if arg.arg in ("monkeypatch", "mocker"):
             return True
@@ -56,7 +59,7 @@ def _has_isolation_context(func_node: Union[ast.FunctionDef, ast.AsyncFunctionDe
     return False
 
 
-# Formas de omitir un test desde su cuerpo, en pytest y en unittest.
+# Ways to skip a test from inside its body, in pytest and in unittest.
 _SKIP_CALLS = frozenset({"pytest.skip", "self.skipTest"})
 _SKIP_EXCEPTIONS = frozenset({"SkipTest", "unittest.SkipTest", "pytest.skip.Exception"})
 
@@ -72,9 +75,9 @@ def _is_skip(stmt: ast.stmt) -> bool:
 
 def _skips_unconditionally(body: List[ast.stmt]) -> bool:
     """
-    El test se omite siempre: un pytest.skip(), self.skipTest() o raise SkipTest en su cuerpo,
-    fuera de cualquier if, try o bucle (un with no decide nada). Un skip condicional no exime al
-    test de tener aserciones: en el camino que no se omite tiene que comprobar algo.
+    True when the test always skips: a pytest.skip(), self.skipTest() or raise SkipTest in its
+    body, outside any if, try or loop (a with block decides nothing). A conditional skip does
+    not excuse the test from having assertions: the path that is not skipped must check something.
     """
     for stmt in body:
         if _is_skip(stmt):
@@ -85,7 +88,7 @@ def _skips_unconditionally(body: List[ast.stmt]) -> bool:
 
 
 def _decorator_name(dec: ast.AST) -> str:
-    """Nombre de un decorador con o sin llamada: @pytest.mark.skip o @pytest.mark.skip(...)."""
+    """Name of a decorator, called or not: @pytest.mark.skip or @pytest.mark.skip(...)."""
     return _chain(dec.func if isinstance(dec, ast.Call) else dec)
 
 
@@ -94,7 +97,7 @@ def _is_true(node: ast.AST) -> bool:
 
 
 def _compares_equal_constants(node: ast.AST) -> bool:
-    """`1 == 1`, `"a" == "a"`: una comparación que siempre se cumple."""
+    """`1 == 1`, `"a" == "a"`: a comparison that always holds."""
     return (
         isinstance(node, ast.Compare)
         and len(node.ops) == 1
@@ -112,15 +115,15 @@ def _string_literal(node: ast.AST) -> Optional[str]:
 
 
 def _is_private(name: str) -> bool:
-    """`_interno` sí; `__dunder__` no, porque forma parte del contrato del objeto."""
+    """`_internal` is private; `__dunder__` is not, since it is part of the object's contract."""
     return name.startswith("_") and not name.startswith("__")
 
 
-# Aviso de calidad sin la línea: (código, nivel, mensaje).
+# A quality issue before its line is attached: (code, level, message).
 _Issue = Tuple[str, str, str]
 
 def _mock_names(*names: str) -> FrozenSet[str]:
-    """Las formas de llamar a algo de unittest.mock: suelto, como mock.X o como unittest.mock.X."""
+    """The spellings of a unittest.mock name: bare, as mock.X, or as unittest.mock.X."""
     return frozenset(f"{prefix}{name}" for name in names for prefix in ("", "mock.", "unittest.mock."))
 
 
@@ -129,19 +132,19 @@ _PATCH_NAMES = _mock_names("patch")
 
 
 def _assert_statement_issues(test: ast.AST, test_name: str) -> List[_Issue]:
-    """assert True y comparaciones entre dos constantes iguales: no comprueban nada."""
+    """assert True and comparisons between two equal constants check nothing."""
     if _is_true(test):
-        return [("WEAK-ASSERT", "ALTO",
-                 f"Aserción tautológica 'assert True' en '{test_name}'. Diseña aserciones pensando en mutación.")]
+        return [("WEAK-ASSERT", "HIGH",
+                 f"Tautological assertion 'assert True' in '{test_name}'. Write assertions that would catch a mutation.")]
     if _compares_equal_constants(test):
-        return [("WEAK-ASSERT", "ALTO", f"Aserción constante trivial en '{test_name}'. Valida comportamiento real.")]
+        return [("WEAK-ASSERT", "HIGH", f"Trivial constant assertion in '{test_name}'. Check real behaviour.")]
     return []
 
 
 def _assertion_call(call: ast.Call, cname: str, test_name: str) -> Tuple[int, List[_Issue]]:
     """
-    self.assert*(), pytest.raises() y pytest.fail() cuentan como aserción. Devuelve (aserciones,
-    avisos).
+    self.assert*(), pytest.raises() and pytest.fail() count as assertions. Returns
+    (assertions counted, issues).
     """
     if isinstance(call.func, ast.Attribute) and call.func.attr.startswith("assert"):
         return 1, _assert_method_issues(call, call.func.attr, test_name)
@@ -154,11 +157,11 @@ def _assertion_call(call: ast.Call, cname: str, test_name: str) -> Tuple[int, Li
 
 def _assert_method_issues(call: ast.Call, method: str, test_name: str) -> List[_Issue]:
     if method == "assertTrue" and call.args and _is_true(call.args[0]):
-        return [("WEAK-ASSERT", "ALTO", f"Aserción tautológica 'assertTrue(True)' en '{test_name}'.")]
+        return [("WEAK-ASSERT", "HIGH", f"Tautological assertion 'assertTrue(True)' in '{test_name}'.")]
     if method == "assertRaises" and call.args and _is_generic_exc(call.args[0]):
-        return [("GENERIC-RAISES", "ALTO",
-                 f"Uso de assertRaises(Exception/BaseException) genérico en '{test_name}'. "
-                 "Valida la excepción exacta y usa assertRaisesRegex.")]
+        return [("GENERIC-RAISES", "HIGH",
+                 f"Generic assertRaises(Exception/BaseException) in '{test_name}'. "
+                 "Check the exact exception and use assertRaisesRegex.")]
     return []
 
 
@@ -166,50 +169,51 @@ def _pytest_raises_issues(call: ast.Call, test_name: str) -> List[_Issue]:
     if not call.args:
         return []
     if _is_generic_exc(call.args[0]):
-        return [("GENERIC-RAISES", "ALTO",
-                 f"Uso de pytest.raises(Exception/BaseException) en '{test_name}'. "
-                 "Exige excepción específica + match=r'...'.")]
+        return [("GENERIC-RAISES", "HIGH",
+                 f"pytest.raises(Exception/BaseException) in '{test_name}'. "
+                 "Require a specific exception plus match=r'...'.")]
     if not _is_timeout_exc_arg(call.args[0]) and not any(kw.arg == "match" for kw in call.keywords):
-        return [("GENERIC-RAISES", "MEDIO", f"pytest.raises(...) sin argumento 'match=r\"...\"' en '{test_name}'.")]
+        return [("GENERIC-RAISES", "MEDIUM", f"pytest.raises(...) without a 'match=r\"...\"' argument in '{test_name}'.")]
     return []
 
 
 def _test_double_issues(call: ast.Call, cname: str, test_name: str) -> List[_Issue]:
     """
-    Los dobles deben llevar spec/spec_set o autospec para acoplarse a la firma real y fallar
-    cuando la interfaz cambia, y no deben sustituir miembros privados.
+    Test doubles should carry spec/spec_set or autospec, so they are bound to the real signature
+    and fail when the interface changes, and they should not replace private members.
     """
     if cname in _MOCK_CLASSES:
         if any(kw.arg in ("spec", "spec_set") for kw in call.keywords):
             return []
-        return [("UNSAFE-MOCK", "MEDIO",
-                 f"'{cname}()' sin 'spec=' ni 'spec_set=' en '{test_name}'. "
-                 "Usa spec/autospec=True para detectar cambios de firma.")]
+        return [("UNSAFE-MOCK", "MEDIUM",
+                 f"'{cname}()' without 'spec=' or 'spec_set=' in '{test_name}'. "
+                 "Use spec/autospec=True to catch signature changes.")]
     if cname in _PATCH_NAMES:
         return _patch_issues(call, test_name)
     if cname.endswith("patch.object") and len(call.args) >= 2:
         method = _string_literal(call.args[1])
         if method is not None and _is_private(method):
-            return [("UNSAFE-MOCK", "MEDIO",
-                     f"Mockeo del método privado '{method}' en '{test_name}'. Prueba el comportamiento observable.")]
+            return [("UNSAFE-MOCK", "MEDIUM",
+                     f"Private method '{method}' is mocked in '{test_name}'. Test the observable behaviour instead.")]
     return []
 
 
 def _patch_issues(call: ast.Call, test_name: str) -> List[_Issue]:
+    """patch() without autospec/spec/new, or patching a private member."""
     issues: List[_Issue] = []
     if not any(kw.arg in ("autospec", "spec", "spec_set", "new") for kw in call.keywords):
-        issues.append(("UNSAFE-MOCK", "MEDIO", f"patch() sin 'autospec=True' en '{test_name}'."))
+        issues.append(("UNSAFE-MOCK", "MEDIUM", f"patch() without 'autospec=True' in '{test_name}'."))
     target = _string_literal(call.args[0]) if call.args else None
     if target is not None and _is_private(target.rsplit(".", 1)[-1]):
-        issues.append(("UNSAFE-MOCK", "MEDIO",
-                       f"Mockeo de miembro privado '{target}' en '{test_name}'. Prueba contratos públicos."))
+        issues.append(("UNSAFE-MOCK", "MEDIUM",
+                       f"Private member '{target}' is mocked in '{test_name}'. Test public contracts instead."))
     return issues
 
 
 class TestQualityAuditor(ast.NodeVisitor):
     """
-    Auditor AST de calidad para suites de prueba unitarias: detecta aserciones débiles,
-    capturas genéricas de excepción, I/O real sin aislamiento y dobles sin contrato de firma.
+    AST quality audit of unit test suites: weak assertions, generic exception checks, real I/O
+    without isolation, and test doubles not bound to a signature.
     """
 
     def __init__(self) -> None:
@@ -241,8 +245,8 @@ class TestQualityAuditor(ast.NodeVisitor):
 
         if local_asserts == 0 and not has_skip:
             self._report(node.lineno, [(
-                "WEAK-ASSERT", "ALTO",
-                f"El test '{node.name}' no contiene ninguna aserción real (assert / pytest.raises).",
+                "WEAK-ASSERT", "HIGH",
+                f"Test '{node.name}' contains no real assertion (assert / pytest.raises).",
             )])
 
         self.generic_visit(node)
@@ -259,16 +263,16 @@ class TestQualityAuditor(ast.NodeVisitor):
                 self.uses_fixtures = True
 
     def _audit_call(self, sub: ast.Call, test_name: str, isolated: bool) -> int:
-        """Revisa una llamada dentro del test. Devuelve las aserciones que aporta."""
+        """Audit one call inside a test. Returns how many assertions it contributes."""
         cname = _chain(sub.func)
         counted, issues = _assertion_call(sub, cname, test_name)
 
-        # El I/O real dentro de una prueba unitaria introduce latencia no determinista y
-        # fragilidad ambiental: debe ir aislado con patch, monkeypatch o un doble.
+        # Real I/O in a unit test brings non-deterministic latency and environment-dependent
+        # failures: it has to be isolated with patch, monkeypatch or a test double.
         if not isolated and (cname in _UNISOLATED_CALLS or cname.startswith(_IO_CALL_PREFIXES)):
             issues.append((
-                "UNISOLATED-IO", "ALTO",
-                f"Llamada real '{cname}()' dentro del test unitario '{test_name}' sin patch/monkeypatch/Mock.",
+                "UNISOLATED-IO", "HIGH",
+                f"Real call '{cname}()' inside unit test '{test_name}' without patch/monkeypatch/Mock.",
             ))
 
         issues.extend(_test_double_issues(sub, cname, test_name))
@@ -284,26 +288,29 @@ class TestQualityAuditor(ast.NodeVisitor):
 
 class QATestRunner:
     """
-    Ejecutor automatizado de suites de pruebas con captura de métricas,
-    tiempos de respuesta, estimación de cobertura y auditoría de calidad SDET.
+    Runs test suites and collects results, timing, an estimate of function coverage and a
+    quality audit of the suite itself.
     """
 
     @staticmethod
     def run_unittest_suite(test_filepath: str) -> Dict[str, Any]:
         """
-        Carga y ejecuta una suite de pruebas unittest desde un archivo de forma aislada.
+        Load and run the unittest suite in a single file, in-process. Results are captured in
+        a buffer instead of being printed. Returns {"error": ...} when the file cannot be
+        loaded.
         """
         try:
             with open(test_filepath, "r", encoding="utf-8"):
                 pass
         except FileNotFoundError:
-            return {"error": f"Archivo de prueba '{test_filepath}' no existe."}
+            return {"error": f"Test file '{test_filepath}' does not exist."}
         except (IsADirectoryError, PermissionError, OSError) as e:
-            return {"error": f"No se pudo abrir '{test_filepath}': {e}"}
+            return {"error": f"Could not open '{test_filepath}': {e}"}
 
         test_dir = os.path.dirname(os.path.abspath(test_filepath))
         test_file_name = os.path.basename(test_filepath)
 
+        # The suite imports the module under test as a sibling, so its directory must be importable.
         if test_dir not in sys.path:
             sys.path.insert(0, test_dir)
 
@@ -313,7 +320,7 @@ class QATestRunner:
         try:
             suite = loader.discover(start_dir=test_dir, pattern=test_file_name)
         except (ImportError, SyntaxError, OSError, ValueError) as e:
-            return {"error": f"Error al descubrir pruebas: {e}"}
+            return {"error": f"Could not discover the tests: {e}"}
 
         stream = io.StringIO()
         runner = unittest.TextTestRunner(stream=stream, verbosity=2)
@@ -351,17 +358,17 @@ class QATestRunner:
     @staticmethod
     def audit_test_suite_quality(test_filepath: str) -> Dict[str, Any]:
         """
-        Audita un archivo de pruebas unitarias evaluando solidez de aserciones,
-        especificidad de excepciones, aislamiento de I/O y uso de spec/autospec en dobles.
+        Audit a unit test file: assertion strength, exception specificity, I/O isolation and
+        spec/autospec on test doubles.
         """
         try:
             with open(test_filepath, "r", encoding="utf-8") as f:
                 test_src = f.read()
             tree = ast.parse(test_src, filename=test_filepath)
         except FileNotFoundError:
-            return {"error": f"Archivo de prueba '{test_filepath}' no existe.", "findings": []}
+            return {"error": f"Test file '{test_filepath}' does not exist.", "findings": []}
         except (IsADirectoryError, PermissionError, OSError, SyntaxError, UnicodeDecodeError) as e:
-            return {"error": f"Error auditando calidad de pruebas: {e}", "findings": []}
+            return {"error": f"Test quality audit error: {e}", "findings": []}
 
         auditor = TestQualityAuditor()
         auditor.visit(tree)
@@ -376,15 +383,16 @@ class QATestRunner:
     @staticmethod
     def estimate_function_coverage(test_filepath: str) -> Dict[str, Any]:
         """
-        Estimación ligera de cobertura: % de funciones públicas del módulo fuente
-        que tienen al menos un test_* referenciándolas + auditoría de calidad de pruebas.
+        Lightweight coverage estimate: the share of the source module's public functions that
+        some test mentions by name, plus the suite's quality audit. The source module is the
+        first `from X import` in the test file, resolved next to it.
         """
         test_dir = os.path.dirname(os.path.abspath(test_filepath))
         try:
             with open(test_filepath, "r", encoding="utf-8") as f:
                 test_src = f.read()
         except OSError:
-            return {"error": "no se pudo leer test file"}
+            return {"error": "could not read the test file"}
 
         quality_audit = QATestRunner.audit_test_suite_quality(test_filepath)
 

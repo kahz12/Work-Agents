@@ -9,15 +9,17 @@ from ..common.schema import matches_schema_type, validate_typed_schema
 
 class InputSanitizer:
     """
-    Módulo para validación y sanitización defensiva de datos de entrada.
-    Evita vulnerabilidades comunes como Cross-Site Scripting (XSS),
-    Path Traversal, Formatos Inválidos e inyecciones en estructuras JSON.
+    Validation and sanitisation of untrusted input.
+
+    Guards against the usual suspects: cross-site scripting (XSS), path traversal, malformed
+    formats and unexpected shapes in JSON payloads.
     """
 
     @staticmethod
     def sanitize_html(text: str) -> str:
         """
-        Escapa caracteres HTML especiales para prevenir Cross-Site Scripting (XSS).
+        Escape HTML special characters (quotes included) to prevent cross-site scripting.
+        Non-string input yields an empty string.
         """
         if not isinstance(text, str):
             return ""
@@ -26,7 +28,8 @@ class InputSanitizer:
     @staticmethod
     def validate_email(email: str) -> bool:
         """
-        Valida que la cadena proporcione un formato de correo electrónico legítimo.
+        Check that the string looks like a plausible e-mail address. This is a format check
+        only; it says nothing about whether the mailbox exists.
         """
         pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
         return bool(re.match(pattern, email.strip())) if email else False
@@ -34,7 +37,8 @@ class InputSanitizer:
     @staticmethod
     def sanitize_filename(filename: str) -> str:
         """
-        Sanitiza nombres de archivos evitando Path Traversal (ej. ../../etc/passwd).
+        Reduce a user-supplied file name to a safe base name, defeating path traversal
+        (../../etc/passwd becomes "passwd"). Anything outside [A-Za-z0-9_.-] becomes "_".
         """
         if not isinstance(filename, str) or not filename:
             return "file_default"
@@ -49,8 +53,9 @@ class InputSanitizer:
     @staticmethod
     def validate_safe_path(base_dir: str, user_path: str) -> Optional[str]:
         """
-        Resuelve canónicamente `user_path` respecto a `base_dir` con Path.resolve()
-        y retorna la ruta segura solo si permanece dentro de `base_dir`.
+        Resolve `user_path` against `base_dir` with Path.resolve() (following symlinks and
+        "..") and return it only when the result stays inside `base_dir`. None otherwise,
+        including for NUL bytes, which some APIs would silently truncate at.
         """
         if not isinstance(base_dir, str) or not isinstance(user_path, str):
             return None
@@ -69,11 +74,11 @@ class InputSanitizer:
     @staticmethod
     def validate_string_whitelist(text: str, allowed_chars: str = r"a-zA-Z0-9_\-\s") -> bool:
         """
-        Valida que el texto contenga únicamente caracteres permitidos mediante lista blanca.
-        allowed_chars es el contenido de una clase de caracteres de una expresión regular.
+        Check that the text contains only allow-listed characters. allowed_chars is the body
+        of a regular-expression character class.
 
-        Se usa fullmatch y no `^...$`: en Python `$` también coincide antes de un salto de
-        línea final, y "admin\n" pasaría una lista de solo letras.
+        fullmatch is used rather than `^...$`: in Python `$` also matches just before a
+        trailing newline, so "admin\n" would pass a letters-only allow-list.
         """
         if not isinstance(text, str):
             return False
@@ -82,7 +87,9 @@ class InputSanitizer:
     @staticmethod
     def sanitize_integer(value: Any, min_val: Optional[int] = None, max_val: Optional[int] = None) -> Optional[int]:
         """
-        Convierte y valida números enteros dentro de un rango seguro.
+        Convert the value to int and check it against the optional bounds. Returns None when
+        conversion fails or the value is out of range. bool is rejected even though it is an
+        int subclass.
         """
         try:
             if isinstance(value, bool):
@@ -108,7 +115,7 @@ class InputSanitizer:
         reject_extra_keys: bool = False,
     ) -> Tuple[bool, List[str]]:
         """
-        Valida un objeto/diccionario JSON contra un esquema de tipos (plano o anidado).
-        Delega en agentes.common.schema.
+        Validate a JSON object against a (flat or nested) type schema.
+        Delegates to agentes.common.schema.
         """
         return validate_typed_schema(payload, expected_schema, reject_extra_keys=reject_extra_keys)

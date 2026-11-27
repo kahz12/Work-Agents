@@ -10,77 +10,77 @@ def print_header(title: str):
     print("=" * 65)
 
 def main():
-    print_header("Agente de Seguridad Defensiva y Desarrollo Seguro")
-    print(f"Backend Criptográfico Activo: {AuthManager.get_available_crypto_backend()}")
-    print("1. Sanitización de Entradas, XSS, Path Traversal y Esquemas JSON")
-    print("2. Hashing (Argon2/Bcrypt/PBKDF2), Tokens CSRF, Rate Limiting y RBAC")
-    print("3. Carga Segura y Auditoría Estática de Secretos")
+    print_header("Defensive Security and Secure Development Agent")
+    print(f"Active crypto backend: {AuthManager.get_available_crypto_backend()}")
+    print("1. Input sanitisation, XSS, path traversal and JSON schemas")
+    print("2. Hashing (Argon2/bcrypt/PBKDF2), CSRF tokens, rate limiting and RBAC")
+    print("3. Safe configuration loading and static secret auditing")
 
-    # Sanitización de cadenas HTML, contención de rutas y validación estructural JSON Schema.
-    print_header("Demostración 1: Sanitización de Entradas y Esquemas JSON")
+    # HTML escaping, path containment and structural validation against a typed schema.
+    print_header("Demo 1: Input sanitisation and JSON schemas")
 
-    raw_html_input = "<script>alert('xss')</script><b>Hola</b>"
+    raw_html_input = "<script>alert('xss')</script><b>Hello</b>"
     clean_html = InputSanitizer.sanitize_html(raw_html_input)
-    print(f"Entrada HTML cruda: {raw_html_input}")
-    print(f"Entrada Sanitizada: {clean_html}")
+    print(f"Raw HTML input:  {raw_html_input}")
+    print(f"Sanitised input: {clean_html}")
 
     path_traversal_input = "../../etc/passwd"
     clean_filename = InputSanitizer.sanitize_filename(path_traversal_input)
-    print(f"\nRuta archivo de entrada: {path_traversal_input}")
-    print(f"Nombre sanitizado seguro: {clean_filename}")
+    print(f"\nInput file path:     {path_traversal_input}")
+    print(f"Safe sanitised name: {clean_filename}")
 
-    # Validación tipada de carga útil JSON respetando tipos estrictos en esquema de entrada.
+    # Strict typing: bool must not pass as int, and every declared field must be present.
     json_payload = {"username": "admin", "age": 30, "is_active": True}
     schema = {"username": str, "age": int, "is_active": bool}
     valid_json, errors = InputSanitizer.validate_json_schema(json_payload, schema)
-    print(f"\nValidación de Payload JSON defensivo -> Válido: {valid_json}")
+    print(f"\nDefensive JSON payload validation -> valid: {valid_json}")
 
-    # Autenticación criptográfica, protección HMAC anti-CSRF, limitación de tasa y permisos RBAC.
-    print_header("Demostración 2: Autenticación, Tokens Anti-CSRF y Rate Limiting")
+    # Password hashing, HMAC anti-CSRF tokens, rate limiting and RBAC permissions.
+    print_header("Demo 2: Authentication, anti-CSRF tokens and rate limiting")
 
-    password = "PasswordInsegura123!"
+    password = "InsecurePassword123!"
     score, feedback = AuthManager.evaluate_password_strength(password)
-    print(f"Evaluación Contraseña '{password}': Puntaje {score}/6")
+    print(f"Strength of '{password}': score {score}/6")
 
-    print(f"\nGenerando Hash defensivo con backend [{AuthManager.get_available_crypto_backend()}]...")
+    print(f"\nHashing with the [{AuthManager.get_available_crypto_backend()}] backend...")
     secure_hash = AuthManager.hash_password(password)
-    print(f"Hash Generado: {secure_hash[:55]}...")
+    print(f"Generated hash: {secure_hash[:55]}...")
 
     match = AuthManager.verify_password(password, secure_hash)
-    print(f"Verificación Contraseña Correcta: {match}")
+    print(f"Correct password verifies: {match}")
 
-    # Emisión y validación HMAC de token CSRF ligado a la sesión del usuario.
-    secret = "mi_secreto_super_seguro_12345"
+    # The CSRF token is an HMAC bound to the user's session ID.
+    secret = "csrf_signing_key_8f3a9c2e1b"
     session_id = "sess_987654321"
     csrf_token = AuthManager.create_csrf_token(secret, session_id)
-    print(f"\nToken Anti-CSRF Generado: {csrf_token[:40]}...")
+    print(f"\nGenerated anti-CSRF token: {csrf_token[:40]}...")
     is_valid_csrf = AuthManager.verify_csrf_token(csrf_token, secret, session_id)
-    print(f"Verificación Token CSRF para sesión '{session_id}': {is_valid_csrf}")
+    print(f"CSRF token check for session '{session_id}': {is_valid_csrf}")
 
-    # Control de frecuencia por ventana deslizante para mitigar abusos por IP.
-    print("\nProbando Rate Limiter (Máximo 3 peticiones por ventana):")
+    # Sliding-window rate limiting per client IP: the fourth request inside the window is refused.
+    print("\nRate limiter (at most 3 requests per window):")
     limiter = RateLimiter(max_requests=3, window_seconds=10)
     for i in range(1, 5):
         allowed = limiter.is_allowed("client_ip_127.0.0.1")
-        status = "PERMITIDO" if allowed else "BLOQUEADO (RATE LIMIT EXCEEDED)"
-        print(f"  Petición {i}: {status}")
+        status = "ALLOWED" if allowed else "BLOCKED (RATE LIMIT EXCEEDED)"
+        print(f"  Request {i}: {status}")
 
-    # Auditoría estática de diccionarios de configuración y exposición de secretos en memoria.
-    print_header("Demostración 3: Auditoría Defensiva de Configuración")
+    # Static audit of an in-memory configuration mapping.
+    print_header("Demo 3: Defensive configuration audit")
 
-    config_ejemplo = {
+    sample_config = {
         "SECRET_KEY": "123456",
         "DEBUG": "True",
         "DATABASE_URL": "postgresql://root:root@localhost/db"
     }
 
-    print("Auditando diccionario de configuración en memoria...")
-    hallazgos = ConfigManager.audit_config_dict(config_ejemplo)
-    for clave, nivel, rec in hallazgos:
-        print(f"[{nivel}] Clave: {clave} -> {rec}")
+    print("Auditing an in-memory configuration mapping...")
+    findings = ConfigManager.audit_config_dict(sample_config)
+    for key, level, recommendation in findings:
+        print(f"[{level}] Key: {key} -> {recommendation}")
 
     print("\n" + "=" * 65)
-    print(" Agente Defensivo ejecutado correctamente.")
+    print(" Defensive agent finished successfully.")
     print("=" * 65 + "\n")
 
 if __name__ == "__main__":

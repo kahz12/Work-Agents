@@ -1,11 +1,11 @@
-# Demo del servidor SRE de AGENTES (/metrics y /healthz)
+# Demo image for the AGENTES SRE server (/metrics and /healthz)
 FROM python:3.12-slim
 
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY agentes ./agentes
 
-# Se instala el paquete como cualquier usuario lo haría y se ejecuta sin privilegios.
+# Install the package the way any user would, then run it as an unprivileged user.
 RUN pip install --no-cache-dir . \
     && useradd --create-home --uid 10001 agentes
 

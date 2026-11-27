@@ -3,7 +3,7 @@ import os
 
 class GitLabCIGenerator:
     """
-    Generador automatizado de canalizaciones defensivas para GitLab CI (.gitlab-ci.yml).
+    Generates a GitLab CI pipeline (.gitlab-ci.yml) with lint, test and security (Bandit) stages.
     """
 
     GITLAB_CI_TEMPLATE = """image: python:3.10-slim
@@ -45,7 +45,7 @@ sast_security_job:
     @staticmethod
     def generate_ci_file(output_filepath: str) -> str:
         """
-        Genera un archivo de configuración seguro para GitLab CI.
+        Write the pipeline to output_filepath (parent directories are created) and return the path.
         """
         dirpath = os.path.dirname(os.path.abspath(output_filepath))
         os.makedirs(dirpath, exist_ok=True)

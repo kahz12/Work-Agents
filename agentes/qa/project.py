@@ -1,12 +1,12 @@
 """
-Los módulos del proyecto que importa el módulo analizado.
+The project modules imported by the analysed module.
 
-El generador analiza un archivo, pero sus funciones llaman a helpers y usan clases de otros
-módulos del mismo proyecto: export_rows, de core/report.py, escribe un archivo; ProviderSpec, de
-ai/base.py, es una dataclass que hace falta construir; una pantalla hereda de otra definida en
-otro módulo, que a su vez hereda de Textual. ProjectIndex localiza esos módulos (los que están
-bajo la misma raíz que el analizado) y los lee sin ejecutarlos, con una caché compartida para
-que cada uno se lea una sola vez.
+The generator analyses one file, but its functions call helpers and use classes from other
+modules of the same project: export_rows, from core/report.py, writes a file; ProviderSpec,
+from ai/base.py, is a dataclass that has to be constructed; a screen inherits from another
+screen defined elsewhere, which in turn inherits from Textual. ProjectIndex finds those modules
+(the ones under the same root as the analysed file) and reads them without executing them,
+with a shared cache so each one is read only once.
 """
 from __future__ import annotations
 
@@ -21,28 +21,28 @@ if TYPE_CHECKING:
 
 def module_import(source_filepath: str) -> Tuple[str, str]:
     """
-    (nombre con el que se importa el módulo, directorio que tiene que estar en sys.path). En un
-    paquete el nombre lleva la ruta completa (agentes.common.findings) y la raíz es el directorio
-    que contiene el paquete de más arriba: así funcionan los imports relativos del módulo.
+    (name the module is imported under, directory that must be on sys.path). Inside a package
+    the name is the full dotted path (agentes.common.findings) and the root is the directory that
+    contains the top-level package, which is what makes the module's relative imports work.
     """
     path = os.path.abspath(source_filepath)
     directory, filename = os.path.split(path)
     stem = os.path.splitext(filename)[0]
     parts = [] if stem == "__init__" else [stem]
-    # Se sube mientras haya paquete: los nombres salen de dentro hacia fuera.
+    # Climb while the directory is a package; names are collected innermost first.
     while os.path.isfile(os.path.join(directory, "__init__.py")):
         parts.append(os.path.basename(directory))
         directory = os.path.dirname(directory)
     return ".".join(reversed(parts)) or stem, directory
 
 
-# Lo que un módulo importa del proyecto: nombre local -> (módulo, nombre original), y alias de
-# módulo -> módulo (from pkg import report, import pkg.report as report).
+# What a module imports from the project: local name -> (module, original name), and module
+# alias -> module (from pkg import report, import pkg.report as report).
 ProjectImports = Tuple[Dict[str, Tuple[str, str]], Dict[str, str]]
 
 
 class ProjectIndex:
-    """Los módulos bajo la raíz del módulo analizado, leídos bajo demanda y sin ejecutarlos."""
+    """The modules under the analysed module's root, read on demand and never executed."""
 
     def __init__(self, source_filepath: str) -> None:
         self.module, self.root = module_import(source_filepath)
@@ -52,7 +52,7 @@ class ProjectIndex:
         self._loading: Set[str] = set()
 
     def path_of(self, module: str) -> Optional[str]:
-        """El archivo del módulo dentro del proyecto, o None si no es del proyecto."""
+        """The module's file inside the project, or None when it is not a project module."""
         base = os.path.join(self.root, *module.split("."))
         for candidate in (base + ".py", os.path.join(base, "__init__.py")):
             if os.path.isfile(candidate):
@@ -60,7 +60,7 @@ class ProjectIndex:
         return None
 
     def tree(self, module: str) -> Optional[ast.Module]:
-        """El árbol del módulo, o None si no es del proyecto o no se puede leer."""
+        """The module's AST, or None when it is not a project module or cannot be read."""
         if module not in self._trees:
             path = self.path_of(module)
             tree = None
@@ -74,7 +74,7 @@ class ProjectIndex:
         return self._trees[module]
 
     def resolve(self, module: str, node: ast.ImportFrom) -> Optional[str]:
-        """El módulo del proyecto al que se refiere un from ... import escrito en module, o None."""
+        """The project module a `from ... import` written in module refers to (relative imports included), or None."""
         if node.level:
             parts = module.split(".")
             is_package = (self.path_of(module) or "").endswith("__init__.py")
@@ -86,7 +86,7 @@ class ProjectIndex:
         return target if target and self.path_of(target) else None
 
     def imports_of(self, module: str) -> ProjectImports:
-        """Lo que module importa del proyecto a nivel de módulo, también dentro de un try o un if."""
+        """What module imports from the project at module level, including inside try and if blocks."""
         if module not in self._imports:
             names: Dict[str, Tuple[str, str]] = {}
             modules: Dict[str, str] = {}
@@ -101,14 +101,14 @@ class ProjectIndex:
                         elif alias.name != "*":
                             names[local] = (str(target), alias.name)
                 elif isinstance(node, ast.Import):
-                    # import pkg.mod sin alias se usa como pkg.mod.f(): solo se sigue con alias.
+                    # Without an alias, `import pkg.mod` is used as pkg.mod.f(); only aliased imports are followed.
                     modules.update({a.asname: a.name for a in node.names if a.asname and self.path_of(a.name)})
             self._imports[module] = (names, modules)
         return self._imports[module]
 
     @contextmanager
     def loading(self, module: str) -> Iterator[None]:
-        """Marca un módulo mientras se analiza: si otro lo importa de vuelta, no se entra en bucle."""
+        """Mark a module as being analysed, so a circular import back into it does not recurse forever."""
         self._loading.add(module)
         try:
             yield
@@ -116,7 +116,7 @@ class ProjectIndex:
             self._loading.discard(module)
 
     def visitor(self, module: str) -> Optional["UnitTestGenerator"]:
-        """El análisis del módulo (sus funciones, su E/S), o None si no es del proyecto o ya se está analizando."""
+        """The module's analysis (its functions and their I/O), or None when it is not a project module or is already being analysed."""
         if module in self._visitors:
             return self._visitors[module]
         if module in self._loading:
@@ -132,7 +132,7 @@ class ProjectIndex:
         return visitor
 
     def function_io(self, module: str, name: str) -> Tuple[Set[str], bool]:
-        """(objetivos de patch de la E/S de la función, si la hace siempre) para una función de otro módulo."""
+        """(patch targets for the function's I/O, whether it always performs it) for a function in another module."""
         visitor = self.visitor(module)
         if visitor is None:
             return set(), False
@@ -140,7 +140,7 @@ class ProjectIndex:
 
 
 def _module_level(stmts: list) -> Iterator[ast.stmt]:
-    """Las sentencias de nivel de módulo, entrando en if y try (imports opcionales o de TYPE_CHECKING)."""
+    """Module-level statements, descending into if and try blocks (optional or TYPE_CHECKING imports)."""
     for stmt in stmts:
         yield stmt
         if isinstance(stmt, ast.If):

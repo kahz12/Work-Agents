@@ -1,8 +1,8 @@
-def sumar(a, b):
+def add(a, b):
     return a + b
 
 
-def calcular_descuento(precio, porcentaje):
-    if porcentaje < 0 or porcentaje > 100:
-        raise ValueError("Porcentaje inválido")
-    return precio * (1 - porcentaje / 100)
+def calculate_discount(price, percent):
+    if percent < 0 or percent > 100:
+        raise ValueError("Invalid percentage")
+    return price * (1 - percent / 100)

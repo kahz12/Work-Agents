@@ -6,10 +6,6 @@ This guide covers Work-Agents 3.2.3 end to end: installation, every command with
 options, the rules each auditor applies, the report formats, continuous integration and using
 the agents as a Python library. For an overview, see the [README](../README.md).
 
-> **Language note.** The command-line interface, its messages and the generated reports are in
-> Spanish. Sample output in this guide is shown verbatim, and
-> [Reading the output](#reading-the-output) translates every term you will see.
-
 ## Contents
 
 - [Introduction](#introduction)
@@ -143,26 +139,27 @@ agentes doctor
 `doctor` shows which components are installed and which are missing:
 
 ```text
-Diagnóstico de AGENTES v3.2.3
-=============================
+AGENTES v3.2.3 diagnostics
+==========================
 
-  Componente   Estado    Detalle
-  Python       OK        3.12.3
-  PyYAML       OK        validación de YAML y Kubernetes
-  bandit       opcional  pip install bandit   (sin él se usa el motor AST propio)
-  argon2-cffi  opcional  pip install argon2-cffi
-  bcrypt       OK        hashing de contraseñas con bcrypt
-  pytest       OK        ejecutar suites pytest generadas
+  Component    Status    Detail
+  Python       OK        3.14.4
+  PyYAML       OK        YAML and Kubernetes validation
+  bandit       optional  pip install bandit   (without it, the built-in AST engine is used)
+  argon2-cffi  optional  pip install argon2-cffi
+  bcrypt       OK        password hashing with bcrypt
+  pytest       OK        run generated pytest suites
 
-Hashing de contraseñas  bcrypt
-Salida de las demos     junto a cada agente (define AGENTES_WORKDIR para cambiarlo)
-Color en terminal       desactivado
+Password hashing  bcrypt
+Demo output       next to each agent (set AGENTES_WORKDIR to change it)
+Terminal colour   off
 
-[OK] Listo para usar. Los componentes opcionales amplían funciones, pero no son necesarios.
+[OK] Ready to use. The optional components add features, but they are not required.
+To install them all: pip install -e ".[all]"
 ```
 
-Each row is a component (`Componente`) with its state (`Estado`: `OK`, `opcional` = optional
-and missing, `FALTA` = required and missing) and either what it is used for or how to install
+Each row is a component with its status (`OK`; `optional` when it is optional and missing;
+`MISSING` when it is required and missing) and either what it is used for or how to install
 it. Below the table: the active password hashing backend, where demos write their files and
 whether color is enabled. `doctor` returns `1` only if a required component (Python 3.9+ or
 PyYAML) is missing.
@@ -198,20 +195,19 @@ Everything an auditor detects is a **finding** with these fields:
 | `file`    | File (or URL, for the header audit).                                                 |
 | `line`    | Line number, starting at 1. It is `0` when it does not apply: a missing directive, an HTTP header, the whole file. |
 | `level`   | Severity, see the next table.                                                        |
-| `message` | Description and recommendation, in Spanish.                                          |
+| `message` | Description and recommendation.                                                       |
 | `rule_id` | Rule identifier, see the [rule catalog](#rule-catalog).                              |
 | `category` | `security` (a security risk) or `quality` (reliability, maintainability or performance). Only in the commands' JSON output and in `pipeline.json`. |
 
 ### Security and code quality
 
-The console splits findings into two sections, **Seguridad** (security) and **Calidad del
-código** (code quality), so a security risk does not get buried among missing docstrings. When
+The console splits findings into two sections, **Security** and **Code quality**, so a security risk does not get buried among missing docstrings. When
 an analysis that looks for security problems (`pipeline`, `analyze`) finds none, it says so:
 
 ```text
-[OK] Ningún hallazgo de seguridad.
+[OK] No security findings.
 
-Calidad del código (87): 68 medios, 19 bajos
+Code quality (87): 68 medium, 19 low
 ```
 
 Code quality covers metrics and SOLID principles, performance, test quality, Python and YAML
@@ -224,17 +220,17 @@ exit code.
 
 ### Severities
 
-From most to least severe (the level names are Spanish and appear as-is in JSON and SARIF):
+From most to least severe (the level names appear as-is in JSON and SARIF):
 
-| Level         | Meaning     | Blocking | Typical examples                                                       |
-|---------------|-------------|----------|------------------------------------------------------------------------|
-| `CRITICO`     | critical    | Yes      | `eval`, `pickle.loads`, `os.system`, tracebacks or out-of-memory errors in logs. |
-| `ERROR`       | error       | Yes      | Something could not be analyzed (unreadable file, corrupt manifest). It is never treated as clean. |
-| `ALTO`        | high        | Yes      | `shell=True`, hand-built SQL, secrets, a container running as root.    |
-| `MEDIO`       | medium      | No       | Missing `timeout`, weak hash, unpinned base image.                     |
-| `BAJO`        | low         | No       | Missing docstrings, `assert` outside tests, `>=` in dependencies.      |
-| `INFORMACION` | information | No       | Informational. Not shown on the console.                               |
-| `OK`          | passed      | No       | Check passed. Not shown on the console.                                |
+| Level      | Blocking | Typical examples                                                       |
+|------------|----------|------------------------------------------------------------------------|
+| `CRITICAL` | Yes      | `eval`, `pickle.loads`, `os.system`, tracebacks or out-of-memory errors in logs. |
+| `ERROR`    | Yes      | Something could not be analyzed (unreadable file, corrupt manifest). It is never treated as clean. |
+| `HIGH`     | Yes      | `shell=True`, hand-built SQL, secrets, a container running as root.    |
+| `MEDIUM`   | No       | Missing `timeout`, weak hash, unpinned base image.                     |
+| `LOW`      | No       | Missing docstrings, `assert` outside tests, `>=` in dependencies.      |
+| `INFO`     | No       | Informational. Not shown on the console.                               |
+| `OK`       | No       | Check passed. Not shown on the console.                                |
 
 "Blocking" means the finding makes commands that fail on high or critical findings fail
 (`pipeline`, `audit`, `vulns`, `analyze --fail-on-high`...).
@@ -300,11 +296,9 @@ A misspelled command suggests the closest match and exits with `2`:
 
 ```text
 $ agentes piplene .
-Error: Comando desconocido: 'piplene'.
-  ¿Querías decir 'pipeline'? Ejecuta 'agentes' para ver todos los comandos.
+Error: Unknown command: 'piplene'.
+  Did you mean 'pipeline'? Run 'agentes' to see every command.
 ```
-
-("Unknown command: 'piplene'. Did you mean 'pipeline'? Run 'agentes' to see every command.")
 
 Argument errors are also explained and say how to get help. If something fails unexpectedly,
 `AGENTES_DEBUG=1 agentes ...` prints the full traceback.
@@ -313,78 +307,44 @@ Argument errors are also explained and say how to get help. If something fails u
 
 ## Reading the output
 
-The tool's output is in Spanish. This section translates everything you will see.
-
 ### Status labels
 
-| Label       | Meaning                                                     |
-|-------------|-------------------------------------------------------------|
-| `[OK]`      | Success.                                                    |
-| `[AVISO]`   | Warning: worth reading, does not change the result.         |
-| `[FALLO]`   | Failure: the command will exit with a non-zero code.        |
-| `Error:`    | Usage or environment error (printed to stderr, exit code 2).|
+| Label    | Meaning                                                      |
+|----------|--------------------------------------------------------------|
+| `[OK]`   | Success.                                                     |
+| `[WARN]` | Warning: worth reading, does not change the result.          |
+| `[FAIL]` | Failure: the command will exit with a non-zero code.         |
+| `Error:` | Usage or environment error (printed to stderr, exit code 2). |
 
 ### Pipeline table
 
-| Spanish                              | English                                          |
-|--------------------------------------|--------------------------------------------------|
-| `Etapa` / `Estado` / `Resumen`       | Stage / Status / Summary                         |
-| `OK` / `FALLO` / `OMITIDA`           | Passed / Failed / Skipped                        |
-| `Análisis estático`                  | Static analysis                                  |
-| `Secretos`                           | Secrets                                          |
-| `Métricas y SOLID`                   | Metrics and SOLID                                |
-| `Documentación OpenAPI`              | OpenAPI documentation                            |
-| `Infraestructura y dependencias`     | Infrastructure and dependencies                  |
-| `Vulnerabilidades en dependencias`   | Dependency vulnerabilities                       |
-| `N hallazgos SAST (M altos/críticos) en X de Y archivos` | N static analysis findings (M high/critical) in X of Y files |
-| `sin Bandit (solo motor AST; instala el extra 'sast')` | Bandit not available (AST engine only; install the `sast` extra) |
-| `posibles secretos/config insegura` / `(+N config)` | possible secrets / insecure config; N configuration files added |
-| `omitida: no se detectó un framework web` | skipped: no web framework detected          |
-| `omitida: modo sin conexión · N manifiestos sin comprobar` | skipped: offline mode, N manifests not checked |
-| `sin comprobar`                      | not checked (nothing with an exact version)      |
-| `Hallazgos (N): 4 altos, 2 medios`   | Findings (N): 4 high, 2 medium                   |
-| `Informes`                           | Reports                                          |
-| `Sin hallazgos bloqueantes.`         | No blocking findings.                            |
-| `Hay hallazgos bloqueantes (código de salida 1).` | There are blocking findings (exit code 1). |
-| `Línea base X: N hallazgos aceptados no cuentan.` | Baseline X: N accepted findings are not counted. |
-| `N entradas ya no aparecen: regenera la línea base` | N entries no longer appear: regenerate the baseline |
+Each stage has a status: `OK` (passed), `FAILED` (the stage has blocking findings) or `SKIPPED`
+(it could not run or did not apply, for example `skipped: offline mode` or
+`skipped: no web framework detected`). The summary column says what was analyzed:
+
+- `N SAST findings (M high/critical) in X of Y files`, followed by
+  `without Bandit (AST engine only; install the 'sast' extra)` when Bandit is not installed.
+- `N possible secrets/insecure settings in X of Y files (+N config)`: `+N config` counts the
+  configuration files added to the scan.
+- `not checked`: the vulnerability stage found nothing with an exact version to look up.
+
+Below the table, findings are grouped into `Security` and `Code quality`, each with its count by
+severity (`Security (6): 4 high, 2 medium`). With a baseline, the console also says how many
+accepted findings were not counted and how many entries no longer match anything.
 
 ### Findings
 
-| Spanish                         | English                                                  |
-|---------------------------------|----------------------------------------------------------|
-| `[CRITICO]`, `[ALTO]`, `[MEDIO]`, `[BAJO]` | critical, high, medium, low                   |
-| `***REDACTED***`                | Masked part of a secret.                                 |
-| `Corregido en X.`               | Fixed in version X.                                      |
-| `Sin versión corregida publicada.` | No fixed version has been published.                  |
-| `Detectado también por: bandit` | Also detected by Bandit (merged finding).                |
-| `Línea N:`                      | Line N.                                                  |
+Each finding starts with its level in brackets (`[CRITICAL]`, `[HIGH]`, `[MEDIUM]`, `[LOW]`),
+followed by the file and line. Inside the message:
 
-### Other commands
-
-| Command    | Spanish                                                     | English                                   |
-|------------|-------------------------------------------------------------|-------------------------------------------|
-| `metrics`  | `Archivos`, `Líneas de código`, `Funciones`                 | Files, Lines of code, Functions           |
-| `metrics`  | `Complejidad ciclomática / cognitiva media`                 | Average cyclomatic / cognitive complexity |
-| `metrics`  | `Funciones más complejas`, `Recomendaciones`                | Most complex functions, Recommendations   |
-| `test`     | `Ejecutados`, `Correctos`, `Fallidos`, `Con error`, `Omitidos` | Run, Passed, Failed, Errors, Skipped   |
-| `test`     | `Tasa de éxito`, `Duración`, `Cobertura estimada`           | Pass rate, Duration, Estimated coverage   |
-| `health`   | `Sonda`, `Disco`, `Carga`, `MB libres`                      | Probe, Disk, Load, MB free                |
-| `password` | `fuerte`, `aceptable`, `débil`                              | strong, acceptable, weak                  |
-| `fix`      | `Cambios propuestos`, `Cambios aplicados`, `Sin cambios`    | Proposed changes, Applied changes, Unchanged |
-| `contract` | `Comprobación`, `Detalle`, `SLA Latencia`, `Esquema JSON`   | Check, Detail, Latency SLA, JSON schema   |
-
-### Common error messages
-
-| Spanish                                              | English                                         |
-|------------------------------------------------------|-------------------------------------------------|
-| `No existe la ruta: X`                               | Path X does not exist.                          |
-| `Se esperaba un archivo .py`                         | A `.py` file was expected.                      |
-| `Ya existe X y no se ha sobrescrito.`                | X already exists and was not overwritten (use `--force`). |
-| `Comando desconocido` / `¿Querías decir ...?`        | Unknown command / Did you mean ...?             |
-| `Faltan argumentos obligatorios`                     | Required arguments are missing.                 |
-| `... está activo el modo sin conexión`               | ... offline mode is active.                     |
-| `No se pudo consultar OSV`                           | OSV could not be reached.                       |
+| Text                          | Meaning                                                  |
+|-------------------------------|----------------------------------------------------------|
+| `***REDACTED***`              | Masked part of a secret.                                 |
+| `Fixed in X.`                 | The vulnerability is fixed in version X.                 |
+| `No fixed version published.` | No fixed version has been published yet.                 |
+| `Also detected by: bandit`    | Several engines reported it and the findings were merged. |
+| `[bandit]` prefix             | The finding comes from Bandit alone.                     |
+| `Line N:`                     | Line of the manifest the finding refers to.              |
 
 ---
 
@@ -411,48 +371,46 @@ agentes pipeline my_project
 ```
 
 ```text
-Auditoría de my_project
-=======================
+Audit of my_project
+===================
 
-  Etapa                             Estado   Resumen
-  Análisis estático                 FALLO    2 hallazgos SAST (2 altos/críticos) en 2 de 2 archivos
-                                             · sin Bandit (solo motor AST; instala el extra 'sast')
-  Secretos                          FALLO    1 posibles secretos/config insegura en 2 de 2 archivos
-                                             (+1 config)
-  Métricas y SOLID                  OK       avg_cyclomatic=1.0 avg_cognitive=0.0 · 2 archivos · 0
-                                             hallazgos SOLID
-  Documentación OpenAPI             OK       flask: 1 rutas en 2 archivos
-  Infraestructura y dependencias    FALLO    3 hallazgos (1 altos/críticos) en 2 archivos de
-                                             infra/deps/YAML
-  Vulnerabilidades en dependencias  OMITIDA  omitida: modo sin conexión · 1 manifiestos sin
-                                             comprobar
+  Stage                            Status   Summary
+  Static analysis                  FAILED   2 SAST findings (2 high/critical) in 2 of 2 files ·
+                                            without Bandit (AST engine only; install the 'sast'
+                                            extra)
+  Secrets                          FAILED   1 possible secrets/insecure settings in 2 of 2 files (+1
+                                            config)
+  Metrics and SOLID                OK       avg_cyclomatic=1.0 avg_cognitive=0.0 · 2 files · 0 SOLID
+                                            findings
+  OpenAPI documentation            OK       flask: 1 routes in 2 files
+  Infrastructure and dependencies  FAILED   3 findings (1 high/critical) in 2 infra/deps/YAML files
+  Dependency vulnerabilities       SKIPPED  skipped: offline mode · 1 manifests not checked
 
-Hallazgos (6): 4 altos, 2 medios
-  [ALTO]  Dockerfile
-          El Dockerfile no especifica la instrucción 'USER <usuario_no_root>'. El contenedor se
-          ejecutará como root por defecto.
-  [ALTO]  app/main.py:17
-          Ejecución de subproceso con 'shell=True' (riesgo de inyección de comandos).
-  [ALTO]  app/main.py:23
-          Uso inseguro de 'yaml.load()' sin SafeLoader (usa yaml.safe_load).
-  [ALTO]  app/settings.py:1
-          Credencial dentro de una URL de conexion: DB_URL =
-          "postgres://admin:***REDACTED***@db:5432/app"
-  [MEDIO] Dockerfile:1
-          Uso de la etiqueta ':latest' o sin versión fija en la imagen base. Se recomienda
-          especificar la versión exacta.
-  [MEDIO] requirements.txt:2
-          [requests] Línea 2: La dependencia 'requests' no especifica una versión fija (==x.y.z).
-          Esto puede causar cambios no deseados al instalar.
+Security (6): 4 high, 2 medium
+  [HIGH]   my_project/Dockerfile
+           The Dockerfile has no 'USER <non_root_user>' instruction. The container will run as root
+           by default.
+  [HIGH]   my_project/app/main.py:18
+           Subprocess started with 'shell=True' (command injection risk).
+  [HIGH]   my_project/app/main.py:24
+           Unsafe use of 'yaml.load()' without SafeLoader (use yaml.safe_load).
+  [HIGH]   my_project/app/settings.py:1
+           Credential inside a connection URL: DB_URL =
+           "postgres://admin:***REDACTED***@db:5432/app"
+  [MEDIUM] my_project/Dockerfile:1
+           Base image uses ':latest' or no pinned tag. Specify the exact version.
+  [MEDIUM] my_project/requirements.txt:2
+           [requests] Line 2: dependency 'requests' does not pin a version (==x.y.z). Installs can
+           pick up unwanted changes.
 
-Informes
-  HTML     reports/pipeline.html
-  JSON     reports/pipeline.json
-  SARIF    reports/pipeline.sarif
-  OpenAPI  reports/openapi.json
+Reports
+  HTML     my_project/reports/pipeline.html
+  JSON     my_project/reports/pipeline.json
+  SARIF    my_project/reports/pipeline.sarif
+  OpenAPI  my_project/reports/openapi.json
 
-[FALLO] Hay hallazgos bloqueantes (código de salida 1).
-Abre reports/pipeline.html en el navegador para ver el detalle.
+[FAIL] There are blocking findings (exit code 1).
+Open my_project/reports/pipeline.html in a browser for the details.
 ```
 
 (This output comes from a run with `--offline`. With network access, the last stage queries
@@ -460,8 +418,8 @@ OSV.)
 
 How to read it:
 
-1. **The stage table** summarizes each analysis. `FALLO` means the stage has blocking
-   findings; `OMITIDA` means it could not run or did not apply.
+1. **The stage table** summarizes each analysis. `FAILED` means the stage has blocking
+   findings; `SKIPPED` means it could not run or did not apply.
 2. **The findings**, most severe first, with file and line. Here: the container runs as root,
    `shell=True` allows command injection, `yaml.load` without `SafeLoader` is unsafe, a database
    URL contains a password (masked as `***REDACTED***`), the base image uses `:latest`, and
@@ -473,8 +431,7 @@ How to read it:
 
 Replace `shell=True` with an argument list, use `yaml.safe_load`, move the database URL to an
 environment variable, add `USER` to the Dockerfile and pin `requests==<version>`. Run
-`agentes pipeline my_project` again until you see `[OK] Sin hallazgos bloqueantes.` ("No blocking
-findings").
+`agentes pipeline my_project` again until you see `[OK] No blocking findings.`
 
 ### 4. Check what the pipeline does not cover
 
@@ -486,16 +443,19 @@ agentes audit my_project/.env
 ```
 
 ```text
-Hallazgos (2): 2 altos
-  [ALTO] .env
-         [DEBUG] La opción 'DEBUG' está activada. En producción debe estar desactivada.
-  [ALTO] .env
-         [SECRET_KEY] El valor de 'SECRET_KEY' es inseguro o predeterminado ('changeme'). Usa
-         variables de entorno.
+Audit of my_project/.env
+========================
+Kind: env · Items checked: 1
+
+Security (2): 2 high
+  [HIGH] my_project/.env
+         [DEBUG] The 'DEBUG' option is enabled. It must be disabled in production.
+  [HIGH] my_project/.env
+         [SECRET_KEY] The value of 'SECRET_KEY' is insecure or a known default ('changeme'). Use
+         environment variables.
 ```
 
-(`DEBUG` is enabled and must be disabled in production; `SECRET_KEY` has an insecure default
-value.) `agentes audit my_project` reviews infrastructure, dependencies, `.env` files and logs
+`agentes audit my_project` reviews infrastructure, dependencies, `.env` files and logs
 in one go.
 
 ### 5. Next steps
@@ -543,9 +503,9 @@ the JSON report.
 - Analyzes the `.py` files found (honoring `--max-files`).
 - Engines: the [built-in AST engine](#static-analysis-ast-engine) always and, when installed
   and `--no-bandit` is not used, Bandit. Findings from both on the same line and topic are
-  merged into one that says "Detectado también por: bandit" ("also detected by bandit").
-- When Bandit is missing, the summary says so: `sin Bandit (solo motor AST; instala el extra 'sast')`.
-- Status `FALLO` when there are blocking findings (unless `--no-fail`).
+  merged into one that says "Also detected by: bandit".
+- When Bandit is missing, the summary says so: `without Bandit (AST engine only; install the 'sast' extra)`.
+- Status `FAILED` when there are blocking findings (unless `--no-fail`).
 
 **2. Secrets** (`defensive_secrets`)
 
@@ -555,7 +515,7 @@ the JSON report.
 - Excludes its own reports (`pipeline.json`, `analyze.json`, `openapi.json`, `*.sarif`) and the
   file passed to `--baseline` or `--write-baseline`.
 - An unreadable file counts as `ERROR` (rule `SECRET-SCAN-ERROR`): it is never treated as clean.
-- Status `FALLO` when there is at least one secret or unreadable file, **even with `--no-fail`**.
+- Status `FAILED` when there is at least one secret or unreadable file, **even with `--no-fail`**.
 - Pattern details in [Secret detection](#secret-detection).
 
 **3. Metrics and SOLID** (`refactor_metrics`)
@@ -564,11 +524,11 @@ the JSON report.
   ratio.
 - Applies the [SOLID and design](#solid-and-design) and [performance](#performance)
   heuristics from the catalog. In the pipeline, performance findings are always recorded as
-  `MEDIO`.
+  `MEDIUM`.
 - A SOLID finding that repeats what static analysis already found on the same line is not
   counted twice.
 - **It does not affect the exit code.** Its findings appear in the list and reports as
-  refactoring information. The status is `FALLO` only if no file could be parsed.
+  refactoring information. The status is `FAILED` only if no file could be parsed.
 - Refactoring recommendations are in the JSON report (`stages[].recommendations`), following
   the same rules as [`metrics`](#metrics): average-based ones once, and line-specific ones with
   their file, relative to the project root (`pkg/app.py:12`).
@@ -577,7 +537,7 @@ the JSON report.
 
 - Runs only if some file imports a web framework: FastAPI, Flask, Starlette, Django, aiohttp,
   Bottle, Sanic, Tornado, Falcon, Quart, Litestar, Pyramid, CherryPy, Connexion or Responder.
-  Otherwise it is `OMITIDA` (skipped): in a non-web project, a `get_*` function is not an
+  Otherwise it is `SKIPPED` (skipped): in a non-web project, a `get_*` function is not an
   endpoint.
 - Recognizes routes declared with Flask (`@app.route`) and FastAPI (`@app.get`,
   `@router.post`...) decorators. If it finds at least one, it writes `openapi.json` to the
@@ -592,7 +552,7 @@ the JSON report.
   valid YAML until Helm renders them.
 - Rules in [Dockerfile](#dockerfile), [systemd](#systemd), [YAML and Kubernetes](#yaml-and-kubernetes)
   and [Declared dependencies](#declared-dependencies).
-- Status `FALLO` when there are blocking findings (unless `--no-fail`).
+- Status `FAILED` when there are blocking findings (unless `--no-fail`).
 - It does not audit `.env` files (`audit` does).
 
 **6. Dependency vulnerabilities** (`dependency_vulns`)
@@ -601,10 +561,10 @@ the JSON report.
   virtual environment in OSV. Details in [`vulns`](#vulns).
 - Possible statuses:
   - `OK`: there are no manifests or environments, or no blocking vulnerabilities.
-  - `OMITIDA` (skipped): offline mode, OSV did not respond, or nothing can be checked (every
+  - `SKIPPED`: offline mode, OSV did not respond, or nothing can be checked (every
     dependency uses ranges and there is no environment or lock file). In the last case the
-    summary says "sin comprobar" (not checked) instead of a misleading "OK".
-  - `FALLO`: high or critical vulnerabilities (unless `--no-fail`).
+    summary says "not checked" instead of a misleading "OK".
+  - `FAILED`: high or critical vulnerabilities (unless `--no-fail`).
 - A skipped stage never fails the pipeline.
 
 #### Exit code
@@ -697,20 +657,16 @@ with `***REDACTED***`; in a connection URL only the password is hidden.
 
 ```text
 $ agentes secrets .
-Búsqueda de secretos en .
-=========================
-Archivos revisados: 3
+Secret scan of .
+================
+Files scanned: 3
 
-Hallazgos (1): 1 alto
-  [ALTO] app/settings.py:1
-         Credencial dentro de una URL de conexion: DB_URL =
-         "postgres://admin:***REDACTED***@db:5432/app"
+Security (1): 1 high
+  [HIGH] app/settings.py:1
+         Credential inside a connection URL: DB_URL = "postgres://admin:***REDACTED***@db:5432/app"
 
-Los valores se muestran enmascarados. Si un secreto llegó a publicarse, rótalo además de borrarlo.
+Values are shown masked. If a secret was ever published, rotate it as well as deleting it.
 ```
-
-("Files checked: 3. Credential inside a connection URL. Values are shown masked. If a secret
-was ever published, rotate it as well as removing it.")
 
 Returns `1` when it finds at least one secret or unreadable file.
 
@@ -758,12 +714,9 @@ the installed version is unknown. If nothing can be checked, the command says so
 `0`:
 
 ```text
-[AVISO] No se ha comprobado ninguna dependencia: las 4 declaradas usan rangos y no hay un
-        entorno instalado ni un archivo de bloqueo con versiones exactas.
+[WARN] No dependency was checked: all 4 declared ones use ranges, and there is no installed environment or lock file with exact versions.
+Create the project's .venv or a lock file (poetry.lock, Pipfile.lock, pinned requirements) and run it again.
 ```
-
-("No dependency was checked: the 4 declared ones use ranges and there is no installed
-environment or lock file with exact versions.")
 
 #### Result
 
@@ -771,27 +724,22 @@ Each vulnerability is a finding with rule `VULN-<OSV id>` and a message with the
 version, the identifier (the CVE when there is one), the summary and the fixed version:
 
 ```text
-  [MEDIO] requirements.txt:1
-          requests 2.32.4 — CVE-2026-25645: Requests has Insecure Temp File Reuse in its
-          extract_zipped_paths() utility function. Corregido en 2.33.0.
+  [MEDIUM] requirements.txt:1
+           requests 2.32.4 — CVE-2026-25645: Requests has Insecure Temp File Reuse in its
+           extract_zipped_paths() utility function. Fixed in 2.33.0.
 ```
 
-(`Corregido en 2.33.0` = fixed in 2.33.0.)
-
-Severity comes from the GitHub advisory database (GHSA): `CRITICAL` becomes `CRITICO`, `HIGH`
-becomes `ALTO`, `MODERATE` or `MEDIUM` become `MEDIO` and `LOW` becomes `BAJO`. When the
-advisory has no severity, it is treated as `ALTO`.
+Severity comes from the GitHub advisory database (GHSA): `CRITICAL`, `HIGH`, `MEDIUM` and `LOW`
+are kept as they are, and `MODERATE` becomes `MEDIUM`. When the advisory has no severity, it is
+treated as `HIGH`.
 
 If a declared range prevents installing the fixed version (for example `urllib3<2` when the fix
 is in `2.2.2`), it appears in a final section:
 
 ```text
-Restricciones que impiden instalar la corrección
-  - urllib3<2 en pyproject.toml: la corrección necesita 2.2.2. Amplía el límite superior.
+Constraints that block installing the fix
+  - urllib3<2 in pyproject.toml: the fix needs 2.2.2. Raise the upper bound.
 ```
-
-("Constraints preventing the fix: `urllib3<2` in `pyproject.toml`; the fix needs 2.2.2. Raise
-the upper bound.")
 
 #### Exit code
 
@@ -839,7 +787,7 @@ Notes:
   that is not a test suite, use `analyze`.
 - **`.env` templates.** If the name contains `example`, `sample`, `template`, `dist`, `tpl` or
   `defaults` (`.env.example`, `.env.sample`...), empty or example values are expected and not
-  flagged. Only `DEBUG` or `TESTING` enabled by default is reported, as `BAJO`.
+  flagged. Only `DEBUG` or `TESTING` enabled by default is reported, as `LOW`.
 - Reading a `.env` file never exports anything into the process environment.
 - **URLs.** A `GET` request is made with an 8-second timeout. Headers are checked even when the
   server answers with a 4xx or 5xx error.
@@ -870,40 +818,52 @@ informational: **it always returns `0`** (except on usage errors, such as a dire
 
 It shows, in this order:
 
-1. **Totals** (`Archivos`, `Líneas de código`, `Funciones`, average cyclomatic and cognitive
-   complexity per function).
-2. **Most complex files** (`Archivos con mayor complejidad`, when there is more than one), by
+1. **Totals**: files, lines of code, functions, and average cyclomatic and cognitive
+   complexity per function.
+2. **Most complex files** (when there is more than one), by
    average cyclomatic complexity.
-3. **Most complex functions** (`Funciones más complejas`): the top 10 (all with `--limit 0`),
+3. **Most complex functions**: the top 10 (all with `--limit 0`),
    colored by cyclomatic complexity: up to 5 is simple, 6 to 10 deserves attention, more than
    10 calls for splitting.
 4. **Findings** from the [SOLID and design](#solid-and-design) and [performance](#performance)
    rules, with their original severity (unlike the pipeline, where performance is always
-   `MEDIO`).
-5. **Refactoring recommendations** (`Recomendaciones`), of two kinds:
+   `MEDIUM`).
+5. **Refactoring recommendations**, of two kinds:
    - Average-based ones (high average cyclomatic or cognitive complexity, less than 5%
      documentation) are assessed over everything analyzed, like the totals, and appear once.
    - Line-specific ones (SOLID and performance findings) give the file and line, for example
-     `[DISEÑO SRP - src/app/screens.py:412]`.
+     `[DESIGN SRP - src/app/screens.py:412]`.
 
-   When there are more than the limit, the number left out is shown. The `[EXCELENTE]`
-   (excellent) verdict only appears when there are no recommendations and no findings, including
+   When there are more than the limit, the number left out is shown. The `[EXCELLENT]`
+   verdict only appears when there are no recommendations and no findings, including
    files that could not be parsed.
 
 ```text
-Métricas de .
+Metrics for .
 =============
-Archivos                       4
-Líneas de código               39
-Funciones                      8
-Complejidad ciclomática media  1.25
-Complejidad cognitiva media    0.12
+Files                          3
+Lines of code                  17
+Functions                      4
+Average cyclomatic complexity  1.5
+Average cognitive complexity   0.25
 
-Funciones más complejas
-  Ciclom.  Cognit.  Función
-        3        1  descuento  (calc.py:1)
-        1        0  get_user  (app/main.py:10)
-  ...
+Most complex files
+  Lines  Funcs  Cyclom.  Cognit.  File
+      4      1      3.0      1.0  calc.py
+     12      3      1.0      0.0  app/main.py
+      1      0      1.0      0.0  app/settings.py
+
+Most complex functions
+  Cyclom.  Cognit.  Function
+        3        1  discount  (calc.py:4)
+        1        0  get_user  (app/main.py:11)
+        1        0  archive  (app/main.py:16)
+        1        0  load_settings  (app/main.py:21)
+  Reference: up to 5 is simple, 6 to 10 is worth watching, above 10 calls for splitting it up.
+
+Recommendations
+  - [EXCELLENT] The analysed code meets every maintainability, reliability, performance and SOLID
+    threshold.
 ```
 
 **Cyclomatic complexity**: number of independent paths through a function (1 plus each `if`,
@@ -1108,23 +1068,23 @@ its name. Each assertion comes from one of these sources:
    code. A real example:
 
    ```python
-   def descuento(precio: float, porcentaje: float) -> float:
-       if porcentaje < 0 or porcentaje > 100:
-           raise ValueError("porcentaje fuera de rango")
-       return precio - precio * porcentaje / 100
+   def discount(price: float, percent: float) -> float:
+       if percent < 0 or percent > 100:
+           raise ValueError("percent out of range")
+       return price - price * percent / 100
    ```
 
    produces:
 
    ```python
-   def test_descuento_happy_path(self):
-       result = descuento(100.0, 10.0)
-       # Valor calculado a partir del cuerpo de la función.
+   def test_discount_happy_path(self):
+       result = discount(100.0, 10.0)
+       # Value computed from the function body.
        self.assertAlmostEqual(result, 90.0)
 
-   def test_descuento_invalid_input(self):
-       with self.assertRaisesRegex(ValueError, r"porcentaje\ fuera\ de\ rango"):
-           descuento(100.0, -1)
+   def test_discount_invalid_input(self):
+       with self.assertRaisesRegex(ValueError, r"percent\ out\ of\ range"):
+           discount(100.0, -1)
    ```
 
 2. **Real execution**, with `--record`. The module is imported in a separate process and each
@@ -1222,7 +1182,7 @@ pre-releases), has not been yanked and can be installed on your Python version. 
 markers (`; python_version < "3.11"`) and comments are preserved.
 
 Anything that cannot be resolved (nonexistent package, no version satisfies the range) is left
-as is and explained in the "Sin cambios" (unchanged) section. A version is never invented.
+as is and explained in the "Unchanged" section. A version is never invented.
 
 It then looks up every pinned version, new and old, in OSV and lists vulnerabilities with the
 version that fixes them. Versions that were already pinned are not changed: upgrade them
@@ -1230,7 +1190,8 @@ manually to the fixed version shown.
 
 ```text
 $ agentes fix requirements.txt --dry-run
-Cambios propuestos en requirements.txt
+Proposed changes in requirements.txt
+====================================
 
   - flask>=2.0
   + flask==3.1.3
@@ -1265,25 +1226,22 @@ Runs a **unittest** suite and reports its results, estimated coverage and qualit
 - **Suite quality**: applies the [test suite quality](#test-suite-quality) rules.
 
 ```text
-Tests de test_calc.py
+Tests in test_calc.py
 =====================
-Ejecutados     2
-Correctos      2
-Fallidos       0
-Con error      0
-Omitidos       0
-Tasa de éxito  100.0%
-Duración       0.0012 s
+Run        2
+Passed     2
+Failed     0
+Errors     0
+Skipped    0
+Pass rate  100.0%
+Duration   0.001 s
 
-Cobertura estimada
-  1 de 1 funciones públicas de 'calc' tienen algún test (100.0%).
-  Es una estimación por nombres, no una medición de líneas ejecutadas.
+Estimated coverage
+  1 of 1 public functions in 'calc' have at least one test (100.0%).
+  This is an estimate based on names, not a measurement of executed lines.
 
-[OK] Todos los tests pasan.
+[OK] All tests pass.
 ```
-
-("Run 2, passed 2, failed 0, errors 0, skipped 0, pass rate 100%. 1 of 1 public functions of
-`calc` have a test. All tests pass.")
 
 | Option            | Effect                                                     |
 |-------------------|------------------------------------------------------------|
@@ -1305,20 +1263,22 @@ Detects what makes a module hard to test, without running it: mutable global sta
 dependencies created inside functions, I/O mixed with logic and non-deterministic calls. The
 rules are in [Testability rules](#testability-rules).
 
-With `--matrix` it adds a matrix of suggested scenarios per function, in three categories:
+With `--matrix` it adds a matrix of suggested scenarios per function, in up to four categories:
 
 - `HAPPY PATH`: nominal input and output contract.
 - `BOUNDARY / EDGE CASE`: zero, `-1`, empty strings, Unicode, `NaN` or infinity, empty
   collections.
 - `ADVERSARIAL / ERROR`: null or wrongly typed input, with a controlled error expected.
+- `CONCURRENCY / I/O FAULT`: only for functions that do I/O or are `async`. The I/O is mocked to
+  fail (or the coroutine times out) and the error must propagate after cleanup.
 
 ```text
-Escenarios de prueba sugeridos (17)
-  Función   Categoría             Escenario y resultado esperado
-  get_user  HAPPY PATH            nominal_valid: Ejecuta sin excepción y satisface contrato exacto
-                                  de salida.
-  get_user  BOUNDARY / EDGE CASE  boundary_zero: Maneja frontera extrema (0, -1, vacío o Unicode)
-                                  sin fallo silencioso.
+Suggested test scenarios (17)
+  Function       Category                 Scenario and expected result
+  get_user       HAPPY PATH               nominal_valid: Runs without raising and returns exactly
+                                          the contracted output.
+  get_user       BOUNDARY / EDGE CASE     boundary_zero: Handles the extreme boundary (0, -1, empty
+                                          or Unicode) without failing silently.
   ...
 ```
 
@@ -1426,10 +1386,8 @@ not alert.
 
 ```text
 $ agentes sla --total 12000 --errors 340
-[OK] Tasa de errores del 2.83%: dentro del límite del 5.0%.
+[OK] Error rate 2.83%: within the 5.0% limit.
 ```
-
-("Error rate of 2.83%: within the 5.0% limit.")
 
 Returns `1` on alert. With `--total 0` there is no rate to evaluate and it returns `0`. If
 `--errors` is negative or greater than `--total`, it exits with `2`.
@@ -1498,15 +1456,11 @@ Scores the password from 0 to 6 and looks it up in known breaches.
 
 ```text
 $ agentes password check --offline
-Contraseña (no se muestra al escribir):
-[FALLO] Contraseña débil (2 de 6 puntos).
-  - Se basa en una contraseña muy conocida ('password'): es de las primeras que se prueban.
-Filtraciones conocidas (Have I Been Pwned): no comprobada (sin conexión o modo --offline).
+Password (not echoed):
+[FAIL] Password is weak (2 of 6 points).
+  - It is based on a very common password ('password'): one of the first an attacker tries.
+Known breaches (Have I Been Pwned): not checked (no connection or --offline mode).
 ```
-
-("Password (not shown while typing). Weak password (2 of 6 points). It is based on a very
-common password ('password'): one of the first an attacker tries. Known breaches: not checked
-(offline).")
 
 **How it is scored:**
 
@@ -1523,9 +1477,9 @@ common password ('password'): one of the first an attacker tries. Known breaches
 
 | Points | Rating                 |
 |--------|------------------------|
-| 6      | `fuerte` (strong)      |
-| 5      | `aceptable` (acceptable) |
-| 0 to 4 | `débil` (weak)         |
+| 6      | `strong`               |
+| 5      | `acceptable`           |
+| 0 to 4 | `weak`                 |
 
 `Password123!` satisfies every composition rule and is still rated weak.
 
@@ -1605,40 +1559,39 @@ in structured form.
 
 ## Rule catalog
 
-Each table gives the condition that triggers the rule, its severity and notes. The exact
-messages are in Spanish in the output.
+Each table gives the condition that triggers the rule, its severity and notes.
 
 ### Static analysis (AST engine)
 
-Rule in reports: `SAST-<LEVEL>` (for example `SAST-ALTO`).
+Rule in reports: `SAST-<LEVEL>` (for example `SAST-HIGH`).
 
 | Condition                                                                  | Severity | Notes                                               |
 |----------------------------------------------------------------------------|----------|-----------------------------------------------------|
-| Call to `eval()` or `exec()`                                               | CRITICO  |                                                     |
-| `pickle.loads()`                                                           | CRITICO  | Deserialization of untrusted data.                  |
-| `os.system()` or `os.popen()`                                              | CRITICO  | Command injection.                                  |
-| `subprocess.Popen/run/call` with `shell=True`                              | ALTO     |                                                     |
-| `yaml.load()` without `SafeLoader` or `CSafeLoader`                        | ALTO     | Use `yaml.safe_load`.                               |
-| `execute()` or `executemany()` with SQL built with `+`, `%`, an f-string or `.format` | ALTO | Use query parameters.                        |
-| `requests` or `httpx` with `verify=False`                                  | ALTO     | Unverified TLS.                                     |
-| A secret written in code: assignment, annotation, dictionary key or keyword argument (`password=`, `api_key=`, `token`...) | ALTO | Not applied to test files. Ignores values shorter than 8 characters, empty, `<...>`, `$VAR`, `{...}` and fillers such as `changeme`, `your-...`, `example`, `dummy`, `xxxx`. |
-| `random.*` used to produce sensitive material (variables named with `password`, `token`, `secret`, `nonce`, `salt`, `otp`...) | ALTO | Use the `secrets` module. |
-| Bare `except:`                                                             | ALTO     | Also catches `SystemExit` and `KeyboardInterrupt`.  |
-| `except Exception: pass` (or `...`)                                        | MEDIO    | Calibrated: reliability, not security.              |
-| `except Exception:` that discards the error                                | MEDIO    | Not flagged if it re-raises (`raise`) or logs the traceback (`logger.exception`, `exc_info=True`). |
-| `except Exception as e:` that uses `e` (reports or stores it)              | BAJO     | Common at a boundary: CLI, SDK, thread.             |
-| `hashlib.md5()` or `hashlib.sha1()` without `usedforsecurity=False`        | MEDIO    | If it protects nothing (cache, checksums), pass `usedforsecurity=False`. |
-| `requests` or `httpx` without `timeout`                                    | MEDIO    | Risk of hanging forever.                            |
-| `urllib.request.urlopen` without `timeout`                                 | MEDIO    | The import is resolved: another library's `urlopen` does not count. |
-| Blocking call (`requests`, `urlopen`, `time.sleep`) inside `async def`     | MEDIO    |                                                     |
-| `open()` outside a `with` block                                            | MEDIO    | Not flagged when closed in a `finally`, in every `except` plus the `else`, or via `ExitStack.enter_context`. |
-| `open()` with a path built from an f-string, `+` or `%`                    | MEDIO    | Validate the path against path traversal.           |
-| `os.path.exists()` or `isfile()` followed by `open()` for writing on the same variable | MEDIO    | TOCTOU race condition. Reading after the check is not flagged. |
-| Jinja `render` or `from_string`                                            | MEDIO    | Review autoescaping.                                |
-| Function with more than 5 arguments                                        | MEDIO    | Not counting `self` and `cls`.                      |
-| Mutable default argument (list, dict or set)                               | MEDIO    | Use `None`.                                         |
-| Public function without a docstring                                        | BAJO     | Not applied to test files or `_private` functions.  |
-| `assert` outside tests                                                     | BAJO     | `python -O` strips `assert` statements.             |
+| Call to `eval()` or `exec()`                                               | CRITICAL |                                                     |
+| `pickle.loads()`                                                           | CRITICAL | Deserialization of untrusted data.                  |
+| `os.system()` or `os.popen()`                                              | CRITICAL | Command injection.                                  |
+| `subprocess.Popen/run/call` with `shell=True`                              | HIGH     |                                                     |
+| `yaml.load()` without `SafeLoader` or `CSafeLoader`                        | HIGH     | Use `yaml.safe_load`.                               |
+| `execute()` or `executemany()` with SQL built with `+`, `%`, an f-string or `.format` | HIGH | Use query parameters.                        |
+| `requests` or `httpx` with `verify=False`                                  | HIGH     | Unverified TLS.                                     |
+| A secret written in code: assignment, annotation, dictionary key or keyword argument (`password=`, `api_key=`, `token`...) | HIGH | Not applied to test files. Ignores values shorter than 8 characters, empty, `<...>`, `$VAR`, `{...}` and fillers such as `changeme`, `your-...`, `example`, `dummy`, `xxxx`. |
+| `random.*` used to produce sensitive material (variables named with `password`, `token`, `secret`, `nonce`, `salt`, `otp`...) | HIGH | Use the `secrets` module. |
+| Bare `except:`                                                             | HIGH     | Also catches `SystemExit` and `KeyboardInterrupt`.  |
+| `except Exception: pass` (or `...`)                                        | MEDIUM   | Calibrated: reliability, not security.              |
+| `except Exception:` that discards the error                                | MEDIUM   | Not flagged if it re-raises (`raise`) or logs the traceback (`logger.exception`, `exc_info=True`). |
+| `except Exception as e:` that uses `e` (reports or stores it)              | LOW      | Common at a boundary: CLI, SDK, thread.             |
+| `hashlib.md5()` or `hashlib.sha1()` without `usedforsecurity=False`        | MEDIUM   | If it protects nothing (cache, checksums), pass `usedforsecurity=False`. |
+| `requests` or `httpx` without `timeout`                                    | MEDIUM   | Risk of hanging forever.                            |
+| `urllib.request.urlopen` without `timeout`                                 | MEDIUM   | The import is resolved: another library's `urlopen` does not count. |
+| Blocking call (`requests`, `urlopen`, `time.sleep`) inside `async def`     | MEDIUM   |                                                     |
+| `open()` outside a `with` block                                            | MEDIUM   | Not flagged when closed in a `finally`, in every `except` plus the `else`, or via `ExitStack.enter_context`. |
+| `open()` with a path built from an f-string, `+` or `%`                    | MEDIUM   | Validate the path against path traversal.           |
+| `os.path.exists()` or `isfile()` followed by `open()` for writing on the same variable | MEDIUM   | TOCTOU race condition. Reading after the check is not flagged. |
+| Jinja `render` or `from_string`                                            | MEDIUM   | Review autoescaping.                                |
+| Function with more than 5 arguments                                        | MEDIUM   | Not counting `self` and `cls`.                      |
+| Mutable default argument (list, dict or set)                               | MEDIUM   | Use `None`.                                         |
+| Public function without a docstring                                        | LOW      | Not applied to test files or `_private` functions.  |
+| `assert` outside tests                                                     | LOW      | `python -O` strips `assert` statements.             |
 
 Test files are `test_*.py`, `*_test.py` and `conftest.py`.
 
@@ -1648,14 +1601,14 @@ severity. See the [Bandit documentation](https://bandit.readthedocs.io) for its 
 **Merging and calibration.** Bandit, the AST engine and the SOLID auditor sometimes detect the
 same thing on the same line. Those findings are grouped by topic (swallowed exceptions, broad
 except, weak hash, `eval`/`exec`, shell, `pickle`, `yaml.load`, `assert`, SQL) and merged into
-one: the AST engine's message is kept, with the most severe level of the group and a "Detectado
-también por" (also detected by) note. Severity is then calibrated per topic: swallowing
-exceptions and MD5/SHA-1 become `MEDIO` and `assert` becomes `BAJO`; `eval`, `pickle` and
+one: the AST engine's message is kept, with the most severe level of the group and an "Also detected by"
+note. Severity is then calibrated per topic: swallowing
+exceptions and MD5/SHA-1 become `MEDIUM` and `assert` becomes `LOW`; `eval`, `pickle` and
 `shell=True` keep theirs.
 
 ### Secret detection
 
-Rule: `SECRET`. Every secret is `ALTO`. An unreadable file produces `SECRET-SCAN-ERROR` at level
+Rule: `SECRET`. Every secret is `HIGH`. An unreadable file produces `SECRET-SCAN-ERROR` at level
 `ERROR`.
 
 **Provider patterns** (virtually no false positives; applied to every file, tests included):
@@ -1699,12 +1652,12 @@ Rule: `DOCKERFILE`.
 
 | Condition                                              | Severity | Line  |
 |--------------------------------------------------------|----------|-------|
-| No `USER` instruction with a non-root user             | ALTO     | 0     |
-| `USER root` or `USER 0`                                | ALTO     | yes   |
-| `USER` without a user                                  | ALTO     | yes   |
-| `FROM` without an image                                | ALTO     | yes   |
-| `sudo` or `chmod 777`                                  | ALTO     | yes   |
-| `FROM` with `:latest` or no version tag                | MEDIO    | yes   |
+| No `USER` instruction with a non-root user             | HIGH     | 0     |
+| `USER root` or `USER 0`                                | HIGH     | yes   |
+| `USER` without a user                                  | HIGH     | yes   |
+| `FROM` without an image                                | HIGH     | yes   |
+| `sudo` or `chmod 777`                                  | HIGH     | yes   |
+| `FROM` with `:latest` or no version tag                | MEDIUM   | yes   |
 
 ### systemd
 
@@ -1712,10 +1665,10 @@ Rule: `SYSTEMD`. Commented-out lines are ignored: a commented directive protects
 
 | Directive          | Expected value     | Severity when missing or disabled     |
 |--------------------|--------------------|---------------------------------------|
-| `NoNewPrivileges`  | `true`             | ALTO                                  |
-| `ProtectSystem`    | any active value (`strict`, `full`, `true`) | MEDIO        |
-| `ProtectHome`      | `true`             | MEDIO                                 |
-| `PrivateTmp`       | `true`             | BAJO                                  |
+| `NoNewPrivileges`  | `true`             | HIGH                                  |
+| `ProtectSystem`    | any active value (`strict`, `full`, `true`) | MEDIUM       |
+| `ProtectHome`      | `true`             | MEDIUM                                |
+| `PrivateTmp`       | `true`             | LOW                                   |
 
 A directive counts as disabled with `false`, `no`, `off`, `0` or an empty value.
 
@@ -1723,11 +1676,11 @@ A directive counts as disabled with `false`, `no`, `off`, `0` or an empty value.
 
 | Condition                                                        | Rule      | Severity |
 |------------------------------------------------------------------|-----------|----------|
-| YAML that PyYAML cannot read, with the line of the error         | `YAML`    | ALTO     |
-| Pod without `spec.securityContext.runAsNonRoot: true`            | `K8S-POD` | ALTO     |
-| Container without `allowPrivilegeEscalation: false`              | `K8S-POD` | ALTO     |
-| Container without `readOnlyRootFilesystem: true`                 | `K8S-POD` | MEDIO    |
-| Container without `capabilities.drop: [ALL]`                     | `K8S-POD` | MEDIO    |
+| YAML that PyYAML cannot read, with the line of the error         | `YAML`    | HIGH     |
+| Pod without `spec.securityContext.runAsNonRoot: true`            | `K8S-POD` | HIGH     |
+| Container without `allowPrivilegeEscalation: false`              | `K8S-POD` | HIGH     |
+| Container without `readOnlyRootFilesystem: true`                 | `K8S-POD` | MEDIUM   |
+| Container without `capabilities.drop: [ALL]`                     | `K8S-POD` | MEDIUM   |
 
 A tab is only an error where YAML does not allow it (in indentation or as a separator); in
 comments, inside quotes or in a literal block it is valid.
@@ -1742,12 +1695,12 @@ Rule: `HTTP-HEADERS`. Each missing header is flagged:
 
 | Header                      | Severity | Recommended value                                    |
 |-----------------------------|----------|------------------------------------------------------|
-| `Content-Security-Policy`   | ALTO     | `default-src 'self'; script-src 'self'; object-src 'none';` |
-| `X-Frame-Options`           | ALTO     | `DENY`                                               |
-| `X-Content-Type-Options`    | MEDIO    | `nosniff`                                            |
-| `Strict-Transport-Security` | MEDIO    | `max-age=31536000; includeSubDomains; preload`       |
-| `Referrer-Policy`           | MEDIO    | `strict-origin-when-cross-origin`                    |
-| `Permissions-Policy`        | MEDIO    | `geolocation=(), microphone=(), camera=()`           |
+| `Content-Security-Policy`   | HIGH     | `default-src 'self'; script-src 'self'; object-src 'none';` |
+| `X-Frame-Options`           | HIGH     | `DENY`                                               |
+| `X-Content-Type-Options`    | MEDIUM   | `nosniff`                                            |
+| `Strict-Transport-Security` | MEDIUM   | `max-age=31536000; includeSubDomains; preload`       |
+| `Referrer-Policy`           | MEDIUM   | `strict-origin-when-cross-origin`                    |
+| `Permissions-Policy`        | MEDIUM   | `geolocation=(), microphone=(), camera=()`           |
 
 ### `.env` files
 
@@ -1755,12 +1708,12 @@ Rule: `ENV`.
 
 | Condition                                                                 | Severity |
 |---------------------------------------------------------------------------|----------|
-| `DEBUG` or `TESTING` set to `true`, `1` or `yes`                          | ALTO     |
-| A key containing `secret`, `key`, `token` or `password` with the value `admin`, `123456`, `secret`, `changeme`, `default` or `root` | ALTO |
-| The same kind of key with a value shorter than 16 characters              | MEDIO    |
+| `DEBUG` or `TESTING` set to `true`, `1` or `yes`                          | HIGH     |
+| A key containing `secret`, `key`, `token` or `password` with the value `admin`, `123456`, `secret`, `changeme`, `default` or `root` | HIGH |
+| The same kind of key with a value shorter than 16 characters              | MEDIUM   |
 
 Empty values mean "not defined" and are not flagged. In templates (`.env.example`...) only
-`DEBUG`/`TESTING` enabled is reported, as `BAJO`.
+`DEBUG`/`TESTING` enabled is reported, as `LOW`.
 
 ### Logs
 
@@ -1769,19 +1722,19 @@ characters.
 
 | Pattern                                                                | Severity |
 |------------------------------------------------------------------------|----------|
-| `Traceback (most recent call last)`                                    | CRITICO  |
-| `MemoryError`, `OutOfMemoryError` or `Out of memory`                   | CRITICO  |
-| HTTP 5xx response (`HTTP/1.1" 500`...)                                  | ALTO     |
-| `ConnectionRefusedError`, `DatabaseConnectionError` or `TimeoutError`  | ALTO     |
-| `Authentication failed`, `Invalid password` or `Failed login`          | MEDIO    |
+| `Traceback (most recent call last)`                                    | CRITICAL |
+| `MemoryError`, `OutOfMemoryError` or `Out of memory`                   | CRITICAL |
+| HTTP 5xx response (`HTTP/1.1" 500`...)                                  | HIGH     |
+| `ConnectionRefusedError`, `DatabaseConnectionError` or `TimeoutError`  | HIGH     |
+| `Authentication failed`, `Invalid password` or `Failed login`          | MEDIUM   |
 
 ### Declared dependencies
 
 | File                | Condition                                 | Rule       | Severity |
 |---------------------|-------------------------------------------|------------|----------|
-| `requirements*.txt` | No version                                | `DEPS-PIP` | MEDIO    |
-| `requirements*.txt` | `>=` or `~=`                              | `DEPS-PIP` | BAJO     |
-| `package.json`      | Version with `^`, `~` or `*`              | `DEPS-NPM` | MEDIO    |
+| `requirements*.txt` | No version                                | `DEPS-PIP` | MEDIUM   |
+| `requirements*.txt` | `>=` or `~=`                              | `DEPS-PIP` | LOW      |
+| `package.json`      | Version with `^`, `~` or `*`              | `DEPS-NPM` | MEDIUM   |
 | `package.json`      | Invalid JSON                              | `DEPS-NPM` | ERROR    |
 
 A `>=` or `~=` is not flagged when the `pyproject.toml` in the same directory declares that
@@ -1797,35 +1750,35 @@ Rule: `SOLID-<principle>`.
 
 | Principle            | Condition                                                          | Severity |
 |----------------------|--------------------------------------------------------------------|----------|
-| `SRP`                | Class with more than 10 methods                                    | MEDIO    |
-| `OCP`                | Function with more than 12 `if/elif` branches (the ruff and pylint threshold) | MEDIO |
-| `DIP`                | Direct instantiation of a class inside `__init__`                  | BAJO     |
-| `GUARD`              | More than 3 levels of nesting                                      | MEDIO    |
-| `STATE-SAFETY`       | Mutable default argument                                           | ALTO     |
-| `STATE-SAFETY`       | Use of `global`                                                    | MEDIO    |
-| `EXCEPTION-HYGIENE`  | Bare `except:`                                                     | ALTO     |
-| `EXCEPTION-HYGIENE`  | `except` that only does `pass` or `...`                            | ALTO (MEDIO in the pipeline) |
-| `EXCEPTION-HYGIENE`  | Broad catch that silently returns `None`                           | ALTO (MEDIO in the pipeline) |
-| `EXCEPTION-HYGIENE`  | `raise NewException()` inside `except` without `from exc`          | ALTO     |
-| `DATA-CONTRACT`      | `@dataclass` without `slots=True`                                  | BAJO     |
+| `SRP`                | Class with more than 10 methods                                    | MEDIUM   |
+| `OCP`                | Function with more than 12 `if/elif` branches (the ruff and pylint threshold) | MEDIUM |
+| `DIP`                | Direct instantiation of a class inside `__init__`                  | LOW      |
+| `GUARD`              | More than 3 levels of nesting                                      | MEDIUM   |
+| `STATE-SAFETY`       | Mutable default argument                                           | HIGH     |
+| `STATE-SAFETY`       | Use of `global`                                                    | MEDIUM   |
+| `EXCEPTION-HYGIENE`  | Bare `except:`                                                     | HIGH     |
+| `EXCEPTION-HYGIENE`  | `except` that only does `pass` or `...`                            | HIGH (MEDIUM in the pipeline) |
+| `EXCEPTION-HYGIENE`  | Broad catch that silently returns `None`                           | HIGH (MEDIUM in the pipeline) |
+| `EXCEPTION-HYGIENE`  | `raise NewException()` inside `except` without `from exc`          | HIGH     |
+| `DATA-CONTRACT`      | `@dataclass` without `slots=True`                                  | LOW      |
 
 In the pipeline these findings do not change the exit code.
 
 ### Performance
 
-Rule: `PERF`. In the pipeline every one is recorded as `MEDIO`; in `metrics` they keep the
+Rule: `PERF`. In the pipeline every one is recorded as `MEDIUM`; in `metrics` they keep the
 severity in this table.
 
 | Condition                                                                     | Severity |
 |-------------------------------------------------------------------------------|----------|
-| `in` lookup on a list or tuple literal inside a loop                          | ALTO     |
-| `.pop(0)` or `.insert(0, ...)` inside a loop (use `collections.deque`)        | ALTO     |
-| `re.compile()` with the same pattern on every iteration of a loop             | ALTO     |
-| Blocking call inside `async def`                                              | ALTO     |
-| HTTP request inside a loop (N+1 pattern)                                      | ALTO     |
-| Database operation inside a loop (N+1 pattern)                                | ALTO     |
-| String concatenation `s += ...` inside a loop                                 | MEDIO    |
-| `.readlines()` (loads the whole file into memory)                             | MEDIO    |
+| `in` lookup on a list or tuple literal inside a loop                          | HIGH     |
+| `.pop(0)` or `.insert(0, ...)` inside a loop (use `collections.deque`)        | HIGH     |
+| `re.compile()` with the same pattern on every iteration of a loop             | HIGH     |
+| Blocking call inside `async def`                                              | HIGH     |
+| HTTP request inside a loop (N+1 pattern)                                      | HIGH     |
+| Database operation inside a loop (N+1 pattern)                                | HIGH     |
+| String concatenation `s += ...` inside a loop                                 | MEDIUM   |
+| `.readlines()` (loads the whole file into memory)                             | MEDIUM   |
 
 `.pop(0)` and `.insert(0, ...)` outside a loop are not flagged, nor is prepending a path to
 `sys.path`. `re.compile` inside a loop is not flagged when the pattern changes on each iteration.
@@ -1838,14 +1791,14 @@ Rule: `TEST-QUALITY`. Applied by `test` and by `audit` on test files.
 
 | Code              | Condition                                                                   | Severity |
 |-------------------|-----------------------------------------------------------------------------|----------|
-| `WEAK-ASSERT`     | Test without any assertion (except tests marked *skip*)                     | ALTO     |
-| `WEAK-ASSERT`     | `assert True`, `assertTrue(True)` or a comparison of two equal constants    | ALTO     |
-| `GENERIC-RAISES`  | `assertRaises(Exception)` or `pytest.raises(Exception)` (also `BaseException`) | ALTO  |
-| `GENERIC-RAISES`  | `pytest.raises(...)` without `match=`                                       | MEDIO    |
-| `UNISOLATED-IO`   | Real call to `requests.*`, `urllib.request.*`, `urlopen`, `sqlite3.*` or `time.sleep` in a test without `patch`, `monkeypatch` or `Mock` | ALTO |
-| `UNSAFE-MOCK`     | `Mock()` or `MagicMock()` without `spec` or `spec_set`                      | MEDIO    |
-| `UNSAFE-MOCK`     | `patch()` without `autospec`, `spec`, `spec_set` or `new`                   | MEDIO    |
-| `UNSAFE-MOCK`     | `patch` or `patch.object` on a private member (`_something`)                | MEDIO    |
+| `WEAK-ASSERT`     | Test without any assertion (except tests marked *skip*)                     | HIGH     |
+| `WEAK-ASSERT`     | `assert True`, `assertTrue(True)` or a comparison of two equal constants    | HIGH     |
+| `GENERIC-RAISES`  | `assertRaises(Exception)` or `pytest.raises(Exception)` (also `BaseException`) | HIGH  |
+| `GENERIC-RAISES`  | `pytest.raises(...)` without `match=`                                       | MEDIUM   |
+| `UNISOLATED-IO`   | Real call to `requests.*`, `urllib.request.*`, `urlopen`, `sqlite3.*` or `time.sleep` in a test without `patch`, `monkeypatch` or `Mock` | HIGH |
+| `UNSAFE-MOCK`     | `Mock()` or `MagicMock()` without `spec` or `spec_set`                      | MEDIUM   |
+| `UNSAFE-MOCK`     | `patch()` without `autospec`, `spec`, `spec_set` or `new`                   | MEDIUM   |
+| `UNSAFE-MOCK`     | `patch` or `patch.object` on a private member (`_something`)                | MEDIUM   |
 
 ### Testability rules
 
@@ -1853,11 +1806,11 @@ Rule: `TESTABILITY`. Applied by `testability`.
 
 | Code                | Condition                                                                    | Severity |
 |---------------------|------------------------------------------------------------------------------|----------|
-| `GLOBAL-STATE`      | `global` inside a function, or mutation of a module-level variable (`CACHE[k] = v`, `ITEMS.append(x)`) | ALTO |
-| `MIXED-IO`          | A function that mixes logic (conditions, loops, operations) with direct I/O  | ALTO     |
-| `NON-DETERMINISTIC` | `time.time`, `time.monotonic`, `time.perf_counter`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `date.today`, `uuid.uuid4`, `random.*` or `os.getenv` | MEDIO |
-| `NON-DETERMINISTIC` | Direct read of `os.environ[...]`                                             | MEDIO    |
-| `HARDCODED-DEP`     | A function creates a collaborator instead of receiving it. Recognized by the class name: words such as `Client`, `Service`, `Repository`, `Session`, `Engine`, `Connection`, `Database`, `Cache`, `Gateway` or `Adapter` (`UserRepository()`, `HttpClient()`) | MEDIO |
+| `GLOBAL-STATE`      | `global` inside a function, or mutation of a module-level variable (`CACHE[k] = v`, `ITEMS.append(x)`) | HIGH |
+| `MIXED-IO`          | A function that mixes logic (conditions, loops, operations) with direct I/O  | HIGH     |
+| `NON-DETERMINISTIC` | `time.time`, `time.monotonic`, `time.perf_counter`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `date.today`, `uuid.uuid4`, `random.*` or `os.getenv` | MEDIUM |
+| `NON-DETERMINISTIC` | Direct read of `os.environ[...]`                                             | MEDIUM   |
+| `HARDCODED-DEP`     | A function creates a collaborator instead of receiving it. Recognized by the class name: words such as `Client`, `Service`, `Repository`, `Session`, `Engine`, `Connection`, `Database`, `Cache`, `Gateway` or `Adapter` (`UserRepository()`, `HttpClient()`) | MEDIUM |
 
 ---
 
@@ -1884,7 +1837,7 @@ Schema `agentes.pipeline.v1`. Top-level fields:
 | `baseline`      | object  | Only with `--baseline`: `file`, `suppressed` (accepted) and `unused` (entries that no longer appear). |
 | `artifacts`     | object  | Paths of `json`, `html` and `sarif`.                              |
 
-Each stage has `name`, `status` (`ok`, `fail` or `skipped`), `summary` (in Spanish) and
+Each stage has `name`, `status` (`ok`, `fail` or `skipped`), `summary` and
 `findings_count`, plus its own fields:
 
 | Stage               | Extra fields                                                                    |
@@ -1900,7 +1853,7 @@ Examples with `jq`:
 
 ```bash
 jq '.stages[] | {name, status, summary}' reports/pipeline.json
-jq '[.findings[] | select(.level == "ALTO" or .level == "CRITICO")] | length' reports/pipeline.json
+jq '[.findings[] | select(.level == "HIGH" or .level == "CRITICAL")] | length' reports/pipeline.json
 jq -r '.findings[] | "\(.level)\t\(.file):\(.line)\t\(.rule_id)"' reports/pipeline.json
 ```
 
@@ -1912,9 +1865,9 @@ separators, and line; `1` when the finding has no line). Severity mapping:
 
 | Severity                       | SARIF level |
 |--------------------------------|-------------|
-| `CRITICO`, `ALTO`, `ERROR`     | `error`     |
-| `MEDIO`                        | `warning`   |
-| `BAJO`                         | `note`      |
+| `CRITICAL`, `HIGH`, `ERROR`     | `error`     |
+| `MEDIUM`                        | `warning`   |
+| `LOW`                         | `note`      |
 
 Each rule carries the `security` or `maintainability` tag in `properties.tags`. Security rules
 also carry `security-severity` (9.5 critical, 8.0 high, 5.5 medium, 2.0 low), which is what
@@ -1964,14 +1917,10 @@ agentes pipeline . --write-baseline .agentes-baseline.json
 ```
 
 ```text
-[OK] Línea base escrita en .agentes-baseline.json: 4 hallazgos aceptados.
-Los 2 hallazgos medios o bajos no se guardan porque no hacen fallar el pipeline.
-Revisa el archivo antes de versionarlo: todo lo que contiene dejará de hacer fallar el análisis.
+[OK] Baseline written to .agentes-baseline.json: 4 findings accepted.
+The 2 medium or low findings are not stored, because they never fail the pipeline.
+Review the file before committing it: everything it lists will stop failing the analysis.
 ```
-
-("Baseline written: 4 findings accepted. The 2 medium or low findings are not saved because they
-do not fail the pipeline. Review the file before committing it: everything in it will stop
-failing the analysis.")
 
 Only findings that would fail the analysis are saved: blocking findings and every secret. Medium
 and low findings are not needed.
@@ -1986,12 +1935,9 @@ Accepted findings do not count toward stage status or the exit code, and they do
 the list or the reports. The console says how many were accepted:
 
 ```text
-Línea base .agentes-baseline.json: 4 hallazgos aceptados no cuentan.
-  1 entradas ya no aparecen: regenera la línea base para retirarlas.
+Baseline .agentes-baseline.json: 3 accepted findings are not counted.
+  1 entries no longer match anything: regenerate the baseline to drop them.
 ```
-
-("4 accepted findings are not counted. 1 entry no longer appears: regenerate the baseline to
-remove it.")
 
 ### How findings are identified
 
@@ -2009,14 +1955,14 @@ its file relative to the root and its message with line numbers removed. Therefo
 {
   "schema": "agentes.baseline.v1",
   "generated_by": "agentes 3.2.3",
-  "note": "Hallazgos revisados y aceptados. Regenera con: agentes pipeline . --write-baseline <archivo>",
+  "note": "Reviewed and accepted findings. Regenerate with: agentes pipeline . --write-baseline <file>",
   "entries": [
     {
-      "fingerprint": "ea6f756f460fb89640d7",
-      "rule_id": "SAST-ALTO",
+      "fingerprint": "930d4decba31c0168a75",
+      "rule_id": "SAST-HIGH",
       "file": "app/main.py",
-      "level": "ALTO",
-      "message": "Ejecución de subproceso con 'shell=True' (riesgo de inyección de comandos)."
+      "level": "HIGH",
+      "message": "Subprocess started with 'shell=True' (command injection risk)."
     }
   ]
 }
@@ -2073,7 +2019,7 @@ Silenced findings do not count towards the stage status or the exit code and do 
 reports, but the console says how many there are and the JSON counts them in `inline_suppressed`:
 
 ```text
-4 hallazgos silenciados en su línea (# agentes: ignore, noqa o nosec) no se muestran.
+4 findings suppressed inline (# agentes: ignore, noqa or nosec) are not shown.
 ```
 
 Findings without a line (a whole file, a Kubernetes document, an HTTP header) can only be accepted
@@ -2162,8 +2108,7 @@ Make it executable with `chmod +x .git/hooks/pre-commit`.
 ## Library usage
 
 The agents are Python packages you can import. The main interface is the CLI; this section shows
-the most useful classes. Every example was tested with version 3.2.3. Messages returned by these
-functions are in Spanish.
+the most useful classes. Every example was tested with version 3.2.3.
 
 ### Running the pipeline
 
@@ -2207,7 +2152,7 @@ h = AuthManager.hash_password("correct horse battery staple")
 AuthManager.verify_password("correct horse battery staple", h)     # True
 AuthManager.needs_rehash(h)                                          # False
 AuthManager.evaluate_password_strength("Password123!")
-# (2, ["Se basa en una contraseña muy conocida ('password'): ..."])
+# (2, ["It is based on a very common password ('password'): ..."])
 
 # Anti-CSRF token bound to the session (30 minutes by default)
 token = AuthManager.create_csrf_token(secret_key, "session-1")
@@ -2292,7 +2237,7 @@ you give them.
 
 `--offline` or `AGENTES_OFFLINE=1` disables the three external lookups:
 
-- The pipeline marks the vulnerability stage as `OMITIDA` (skipped) and does not fail because of
+- The pipeline marks the vulnerability stage as `SKIPPED` and does not fail because of
   it.
 - `password` reports that breaches could not be checked.
 - `vulns` and `fix`, which make no sense without network access, exit with `2`.
@@ -2303,13 +2248,13 @@ The repository's tests never use the network: they enable offline mode and mock 
 
 ## Troubleshooting
 
-### The summary says "sin Bandit"
+### The summary says "without Bandit"
 
 Bandit is not installed or not on the environment's `PATH`. Install it with
 `pip install -e ".[sast]"`. If you prefer not to use it, add `--no-bandit` and the notice goes
 away.
 
-### The vulnerability stage says "sin comprobar" (not checked)
+### The vulnerability stage says "not checked"
 
 All your dependencies use ranges (`flask>=2.0`) and there is no virtual environment or lock file.
 Solutions, most reliable first:
@@ -2382,6 +2327,5 @@ tool, open an issue with it.
   ranges, the installed version is unknown.
 - **Kubernetes.** The security context is only audited in `kind: Pod` documents, not in
   `Deployment` or other controllers.
-- **Language.** CLI output and reports are in Spanish.
 - **Swagger UI** loads its assets from a CDN.
 - **`password`** needs `argon2-cffi` or `bcrypt` to verify hashes in those formats.

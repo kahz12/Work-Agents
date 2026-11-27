@@ -1,4 +1,4 @@
-"""Tests unitarios ligeros del núcleo compartido y CLI."""
+"""Lightweight unit tests for the shared core and the CLI."""
 import json
 import os
 import sys
@@ -30,7 +30,7 @@ def test_reporting_writes_artifacts(tmp_path):
     report = build_pipeline_report(str(tmp_path), [{"name": "t", "status": "ok", "summary": "x", "findings_count": 0}])
     jp = write_json_report(report, str(tmp_path / "r.json"))
     hp = write_html_summary(report, str(tmp_path / "r.html"))
-    sp = findings_to_sarif("T", [{"file": "a.py", "line": 1, "level": "ALTO", "message": "m"}], str(tmp_path / "r.sarif"))
+    sp = findings_to_sarif("T", [{"file": "a.py", "line": 1, "level": "HIGH", "message": "m"}], str(tmp_path / "r.sarif"))
     assert os.path.isfile(jp) and os.path.isfile(hp) and os.path.isfile(sp)
     assert json.loads(open(jp).read())["schema"] == "agentes.pipeline.v1"
 
@@ -51,7 +51,7 @@ def test_sast_detects_hardcoded_secret(tmp_path):
     p = tmp_path / "bad.py"
     p.write_text('API_KEY = "supersecretvalue123"\n', encoding="utf-8")
     issues = StaticCodeAnalyzer.analyze_python_file(str(p), prefer_bandit=False)
-    assert any("secreto" in i[2].lower() or "API_KEY" in i[2] for i in issues)
+    assert any("secret" in i[2].lower() or "API_KEY" in i[2] for i in issues)
 
 
 def test_openapi_fastapi_decorator(tmp_path):
@@ -61,7 +61,7 @@ def test_openapi_fastapi_decorator(tmp_path):
         'app = None\n'
         '@app.get("/items")\n'
         'def list_items():\n'
-        '    """Lista."""\n'
+        '    """List items."""\n'
         '    return []\n',
         encoding="utf-8",
     )
@@ -70,10 +70,10 @@ def test_openapi_fastapi_decorator(tmp_path):
     assert "get" in spec["paths"]["/items"]
 
 
-# --- Garantías de sanitización HTML, cobertura total de archivos y motor SAST ---
+# --- HTML escaping, full file coverage and the SAST engine ---
 
-def test_html_summary_escapa_contenido_hostil(tmp_path):
-    """El reporte HTML no debe ejecutar lo que venga del código escaneado."""
+def test_html_summary_escapes_hostile_content(tmp_path):
+    """The HTML report must never execute anything coming from the scanned code."""
     from agentes.common.reporting import build_pipeline_report, write_html_summary
     payload = "<script>alert(1)</script>"
     report = build_pipeline_report(
@@ -86,8 +86,8 @@ def test_html_summary_escapa_contenido_hostil(tmp_path):
     assert "&lt;script&gt;" in body
 
 
-def test_pipeline_no_recorta_por_defecto(tmp_path):
-    """Sin max_files se escanean todos los archivos: no hay un límite implícito."""
+def test_pipeline_does_not_truncate_by_default(tmp_path):
+    """Without max_files every file is scanned: there is no implicit limit."""
     from agentes.common.orchestrator import run_pipeline
     for i in range(250):
         (tmp_path / f"f{i:03d}.py").write_text(f'PASSWORD = "hardcodedsecret{i:03d}"\n', encoding="utf-8")
@@ -97,13 +97,13 @@ def test_pipeline_no_recorta_por_defecto(tmp_path):
     )
     assert report["files_scanned"] == 250
     assert report["files_skipped"] == 0
-    # Garantizar que el recorrido completo incluye también los últimos archivos ordenados alfabéticamente.
-    tarde = [f for f in report["findings"] if f["file"].endswith("f249.py")]
-    assert tarde, "el último archivo no aparece en los hallazgos"
+    # The walk must reach the alphabetically last files too.
+    last = [f for f in report["findings"] if f["file"].endswith("f249.py")]
+    assert last, "the last file does not appear in the findings"
 
 
-def test_pipeline_declara_lo_que_no_escaneo(tmp_path):
-    """Con max_files el recorte queda escrito en el reporte, no en silencio."""
+def test_pipeline_states_what_it_did_not_scan(tmp_path):
+    """With max_files the truncation is written into the report, not silent."""
     from agentes.common.orchestrator import run_pipeline
     for i in range(30):
         (tmp_path / f"f{i:02d}.py").write_text("x = 1\n", encoding="utf-8")
@@ -114,11 +114,11 @@ def test_pipeline_declara_lo_que_no_escaneo(tmp_path):
     assert report["files_scanned"] == 10
     assert report["files_skipped"] == 20
     sast = next(s for s in report["stages"] if s["name"] == "quality_sast")
-    assert "20 archivos NO escaneados" in sast["summary"]
+    assert "20 files NOT scanned" in sast["summary"]
 
 
-def test_pipeline_motor_por_defecto_intacto(tmp_path):
-    """Con el motor por defecto (Bandit si está instalado) el pipeline también informa de los hallazgos."""
+def test_pipeline_default_engine_still_reports_findings(tmp_path):
+    """With the default engine (Bandit when installed) the pipeline still reports findings."""
     from agentes.common.orchestrator import run_pipeline
     (tmp_path / "app.py").write_text('import subprocess\nsubprocess.Popen("ls", shell=True)\n', encoding="utf-8")
     report, _ = run_pipeline(
@@ -130,10 +130,10 @@ def test_pipeline_motor_por_defecto_intacto(tmp_path):
 
 
 def _declared_packages():
-    """Lee [tool.setuptools].packages sin depender de tomllib (3.11+)."""
+    """Read [tool.setuptools].packages without requiring tomllib (3.11+)."""
     try:
         import tomllib
-    except ImportError:  # En Python anterior a 3.11 tomllib aún no forma parte de la biblioteca estándar.
+    except ImportError:  # tomllib joined the standard library in Python 3.11.
         tomllib = None
     path = os.path.join(ROOT, "pyproject.toml")
     if tomllib is not None:
@@ -142,39 +142,39 @@ def _declared_packages():
     import re
     body = open(path, encoding="utf-8").read()
     block = re.search(r"^packages = \[(.*?)\]", body, re.S | re.M)
-    assert block, "no se encontró la lista packages en pyproject.toml"
+    assert block, "the packages list was not found in pyproject.toml"
     return set(re.findall(r'"([^"]+)"', block.group(1)))
 
 
-def test_paquetes_de_agentes_declarados_para_el_wheel():
-    """pip install . debe llevarse los 8 agentes, no solo agentes.common."""
+def test_agent_packages_are_declared_for_the_wheel():
+    """pip install . must ship all 8 agents, not just agentes.common."""
     declared = _declared_packages()
     for agent in ("cli", "common", "qa", "quality", "defensive", "devops", "docs", "hardening", "refactor", "sre"):
-        assert f"agentes.{agent}" in declared, f"agentes.{agent} no va en el wheel"
+        assert f"agentes.{agent}" in declared, f"agentes.{agent} is missing from the wheel"
         assert os.path.isfile(os.path.join(ROOT, "agentes", agent, "__init__.py"))
 
 
-def test_no_quedan_paquetes_de_nivel_superior_genericos():
-    """Todo vive bajo agentes/: nada de un paquete 'common' suelto en site-packages."""
+def test_no_generic_top_level_packages_are_installed():
+    """Everything lives under agentes/: no stray 'common' package in site-packages."""
     declared = _declared_packages()
     assert all(p == "agentes" or p.startswith("agentes.") for p in declared), declared
 
 
-def test_la_libreria_no_manipula_sys_path():
-    """Los imports internos son relativos; ningún módulo de agentes/ toca sys.path."""
+def test_the_library_does_not_touch_sys_path():
+    """Internal imports are relative; no module under agentes/ modifies sys.path."""
     import glob
     for path in glob.glob(os.path.join(ROOT, "agentes", "**", "*.py"), recursive=True):
         if os.path.basename(path) == "test_runner.py":
-            continue  # ejecuta suites de terceros y necesita su directorio en sys.path
+            continue  # runs third-party suites and needs their directory on sys.path
         if os.path.basename(path) == "expected_values.py":
-            continue  # el sys.path que toca es el del proceso hijo que graba resultados
+            continue  # the sys.path it touches belongs to the child process that records results
         if os.path.basename(path) == "call_plan.py":
-            continue  # el sys.path que toca es el de la suite que genera, no el de agentes
+            continue  # the sys.path it touches is the generated suite's, not agentes'
         body = open(path, encoding="utf-8").read()
         assert "sys.path.insert" not in body, path
 
 
-def test_output_dir_cae_al_cwd_si_la_instalacion_es_solo_lectura(tmp_path, monkeypatch):
+def test_output_dir_falls_back_to_cwd_for_a_read_only_install(tmp_path, monkeypatch):
     from agentes.common import workspace
     monkeypatch.setattr(workspace.os, "access", lambda p, m: False)
     monkeypatch.delenv("AGENTES_WORKDIR", raising=False)
@@ -184,33 +184,33 @@ def test_output_dir_cae_al_cwd_si_la_instalacion_es_solo_lectura(tmp_path, monke
     assert os.path.isdir(out)
 
 
-def test_output_dir_respeta_AGENTES_WORKDIR(tmp_path, monkeypatch):
+def test_output_dir_honours_AGENTES_WORKDIR(tmp_path, monkeypatch):
     from agentes.common import workspace
     monkeypatch.setenv("AGENTES_WORKDIR", str(tmp_path / "wd"))
     out = workspace.agent_output_dir(os.path.join(ROOT, "agentes", "qa", "main.py"))
     assert out == str(tmp_path / "wd" / "qa")
 
 
-# --- Resiliencia ante fuentes ilegibles, permisos restringidos e invariantes de auditoría ---
+# --- Resilience against unreadable sources, restricted permissions and audit invariants ---
 
-def test_pipeline_sobrevive_a_un_py_que_no_parsea(tmp_path):
-    """Un solo fuente roto no puede tumbar el pipeline y perder el reporte entero."""
+def test_pipeline_survives_a_py_file_that_does_not_parse(tmp_path):
+    """A single broken source must not take down the pipeline and lose the whole report."""
     from agentes.common.orchestrator import run_pipeline
-    (tmp_path / "aaa_roto.py").write_text("def (:\n", encoding="utf-8")
-    (tmp_path / "zzz.py").write_text('PASSWORD = "secreto123456"\n', encoding="utf-8")
+    (tmp_path / "aaa_broken.py").write_text("def (:\n", encoding="utf-8")
+    (tmp_path / "zzz.py").write_text('PASSWORD = "secret123456"\n', encoding="utf-8")
     report, _ = run_pipeline(
         str(tmp_path), agents_root=ROOT, output_dir=str(tmp_path / "rep"),
         fail_on_high=False, prefer_bandit=False,
     )
     assert os.path.isfile(str(tmp_path / "rep" / "pipeline.json"))
-    roto = str(tmp_path / "aaa_roto.py")
-    assert any(f["file"] == roto and "sintaxis" in f["message"] for f in report["findings"])
+    broken = str(tmp_path / "aaa_broken.py")
+    assert any(f["file"] == broken and "Syntax error" in f["message"] for f in report["findings"])
     metrics = next(s for s in report["stages"] if s["name"] == "refactor_metrics")
-    assert any("aaa_roto.py" in e for e in metrics["errors"])
-    # El fallo de análisis sintáctico en un módulo no debe impedir la detección de secretos en módulos válidos.
+    assert any("aaa_broken.py" in e for e in metrics["errors"])
+    # A parse failure in one module must not prevent secret detection in the valid ones.
     assert any(f.get("rule_id") == "SECRET" for f in report["findings"])
 
-    # Con un framework web, la etapa de OpenAPI también informa del archivo que no se pudo leer.
+    # With a web framework, the OpenAPI stage also reports the file it could not read.
     (tmp_path / "web.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
     report, _ = run_pipeline(
         str(tmp_path), agents_root=ROOT, output_dir=str(tmp_path / "rep"),
@@ -220,79 +220,79 @@ def test_pipeline_sobrevive_a_un_py_que_no_parsea(tmp_path):
     assert docs["status"] == "fail" and docs["errors"]
 
 
-def test_openapi_no_lanza_con_fuente_ilegible(tmp_path):
+def test_openapi_does_not_raise_on_an_unreadable_source(tmp_path):
     from agentes.docs.openapi_generator import OpenAPIGenerator
-    roto = tmp_path / "r.py"
-    roto.write_text("def (:\n", encoding="utf-8")
-    spec = OpenAPIGenerator.generate_openapi_spec(str(roto))
+    broken = tmp_path / "r.py"
+    broken.write_text("def (:\n", encoding="utf-8")
+    spec = OpenAPIGenerator.generate_openapi_spec(str(broken))
     assert spec["x-agentes-errors"]
     assert OpenAPIGenerator.generate_openapi_spec(str(tmp_path / "no.py"))["x-agentes-errors"]
 
 
-def test_testgen_no_lanza_con_fuente_ilegible(tmp_path):
+def test_test_generator_does_not_raise_on_an_unreadable_source(tmp_path):
     from agentes.qa.test_generator import QATestGenerator
-    roto = tmp_path / "r.py"
-    roto.write_text("def (:\n", encoding="utf-8")
-    assert QATestGenerator.generate_test_suite(str(roto), str(tmp_path / "t.py")) == ""
+    broken = tmp_path / "r.py"
+    broken.write_text("def (:\n", encoding="utf-8")
+    assert QATestGenerator.generate_test_suite(str(broken), str(tmp_path / "t.py")) == ""
 
 
-def test_dockerfile_user_no_root_no_es_falso_positivo(tmp_path):
-    """'nonroot' contiene 'root' y '1000' contiene '0': no vale buscar subcadenas."""
+def test_dockerfile_non_root_user_is_not_a_false_positive(tmp_path):
+    """'nonroot' contains 'root' and '1000' contains '0': substring matching is not enough."""
     from agentes.hardening.container_hardening import ContainerHardening
 
-    def avisa_de_root(linea):
-        p = tmp_path / ("Dockerfile" + linea.replace(" ", "_").replace(":", "-"))
-        p.write_text(f"FROM python:3.12-slim\n{linea}\n", encoding="utf-8")
-        return any("root" in f[2] or "usuario" in f[2] for f in ContainerHardening.audit_dockerfile(str(p)))
+    def warns_about_root(line):
+        p = tmp_path / ("Dockerfile" + line.replace(" ", "_").replace(":", "-"))
+        p.write_text(f"FROM python:3.12-slim\n{line}\n", encoding="utf-8")
+        return any("root" in f[2] or "user given" in f[2] for f in ContainerHardening.audit_dockerfile(str(p)))
 
-    for correcto in ("USER appuser", "USER nonroot", "USER app10", "USER 1000", "USER 1000:1000"):
-        assert not avisa_de_root(correcto), correcto
-    for inseguro in ("USER root", "USER 0", "USER root:root"):
-        assert avisa_de_root(inseguro), inseguro
+    for fine in ("USER appuser", "USER nonroot", "USER app10", "USER 1000", "USER 1000:1000"):
+        assert not warns_about_root(fine), fine
+    for unsafe in ("USER root", "USER 0", "USER root:root"):
+        assert warns_about_root(unsafe), unsafe
 
 
-def test_systemd_directiva_comentada_o_desactivada_no_cuenta(tmp_path):
+def test_systemd_commented_or_disabled_directives_do_not_count(tmp_path):
     from agentes.hardening.service_hardening import ServiceHardening
 
-    def limpio(body):
+    def clean(body):
         p = tmp_path / (str(abs(hash(body))) + ".service")
         p.write_text(body, encoding="utf-8")
         r = ServiceHardening.audit_systemd_service(str(p))
         return bool(r) and r[0][1] == "OK"
 
-    completo = "[Service]\nNoNewPrivileges=true\nProtectHome=true\nPrivateTmp=true\nProtectSystem=strict\n"
-    assert limpio(completo)
-    assert limpio("[Service]\nNoNewPrivileges = true\nProtectHome = true\nPrivateTmp = true\nProtectSystem = full\n")
-    assert not limpio("[Service]\n# NoNewPrivileges=true\n# ProtectHome=true\n# PrivateTmp=true\n# ProtectSystem=strict\n")
-    assert not limpio(completo.replace("ProtectSystem=strict", "ProtectSystem=false"))
-    assert not limpio(completo.replace("NoNewPrivileges=true", "NoNewPrivileges=no"))
+    complete = "[Service]\nNoNewPrivileges=true\nProtectHome=true\nPrivateTmp=true\nProtectSystem=strict\n"
+    assert clean(complete)
+    assert clean("[Service]\nNoNewPrivileges = true\nProtectHome = true\nPrivateTmp = true\nProtectSystem = full\n")
+    assert not clean("[Service]\n# NoNewPrivileges=true\n# ProtectHome=true\n# PrivateTmp=true\n# ProtectSystem=strict\n")
+    assert not clean(complete.replace("ProtectSystem=strict", "ProtectSystem=false"))
+    assert not clean(complete.replace("NoNewPrivileges=true", "NoNewPrivileges=no"))
 
 
-def test_escaneo_de_secretos_no_silencia_ficheros_ilegibles(tmp_path):
+def test_secret_scan_does_not_silence_unreadable_files(tmp_path):
     from agentes.defensive.config_manager import ConfigManager
-    d = tmp_path / "soy_un_dir"
+    d = tmp_path / "i_am_a_dir"
     d.mkdir()
-    for ruta in (str(d), str(tmp_path / "no_existe.py")):
-        r = ConfigManager.scan_file_for_secrets(ruta)
-        assert r and "ERROR" in r[0][1], ruta
+    for path in (str(d), str(tmp_path / "missing.py")):
+        r = ConfigManager.scan_file_for_secrets(path)
+        assert r and "error" in r[0][1].lower(), path
 
 
 def test_load_env_file(tmp_path):
-    """load_env_file devuelve las variables del .env sin comillas ni espacios y sin las líneas mal formadas."""
+    """load_env_file returns the .env variables without quotes or surrounding spaces, skipping malformed lines."""
     from agentes.defensive.config_manager import ConfigManager
     env = tmp_path / ".env"
-    env.write_text('# comentario\nAPI_KEY="secreto"\nVACIO=\nMAL_FORMADA\nESPACIOS = con espacios \n', encoding="utf-8")
+    env.write_text('# comment\nAPI_KEY="secret"\nEMPTY=\nMALFORMED\nSPACES = with spaces \n', encoding="utf-8")
     assert ConfigManager.load_env_file(str(env)) == {
-        "API_KEY": "secreto", "VACIO": "", "ESPACIOS": "con espacios",
+        "API_KEY": "secret", "EMPTY": "", "SPACES": "with spaces",
     }
 
 
-# --- Detección de secretos: corpus de positivos y negativos ---
+# --- Secret detection: corpus of positives and negatives ---
 
-# Los tokens falsos van partidos en dos literales ("ghp_" "16C7..."): Python los une y el detector
-# recibe el token entero, pero el archivo no contiene ninguno completo y la protección de
-# secretos de GitHub no bloquea el push.
-SECRETOS_REALES = [
+# Fake tokens are split into two literals ("ghp_" "16C7..."): Python joins them and the detector
+# sees the whole token, but the file never contains a complete one, so GitHub's secret
+# protection does not block the push.
+REAL_SECRETS = [
     ("aws access key id", 'AWS_KEY = "AKIA' 'IOSFODNN7EXAMPLE"'),
     ("aws temp key", 'k = "ASIA' 'IOSFODNN7EXAMPLE"'),
     ("aws secret key", 'aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'),
@@ -306,79 +306,79 @@ SECRETOS_REALES = [
     ("anthropic", 'A = "sk-ant-' 'api03-abcdefghijklmnopqrstuvwxyz0123456789"'),
     ("sendgrid", 'S = "SG.' 'ngeVfQFYQlKU0ufo8x5d1A.TwL2iGABf9DHoTf-09kqeF8tAmbihYzrnopyDO0QSwM"'),
     ("npm", 'N = "npm_' 'abcdefghijklmnopqrstuvwxyz0123456789"'),
-    ("clave privada PEM", "-----BEGIN RSA PRIVATE KEY-----"),
-    ("clave privada ssh", "-----BEGIN OPENSSH PRIVATE KEY-----"),
+    ("PEM private key", "-----BEGIN RSA PRIVATE KEY-----"),
+    ("ssh private key", "-----BEGIN OPENSSH PRIVATE KEY-----"),
     ("jwt", 'j = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"'),
-    ("postgres con clave", 'DB = "postgresql://usuario:MiClaveSecreta@db.example.com:5432/prod"'),
-    ("mongodb con clave", 'DB = "mongodb+srv://admin:p4ssw0rd@cluster0.mongodb.net/test"'),
+    ("postgres with password", 'DB = "postgresql://user:MySecretPassword@db.example.com:5432/prod"'),
+    ("mongodb with password", 'DB = "mongodb+srv://admin:p4ssw0rd@cluster0.mongodb.net/test"'),
     ("basic auth", 'headers = {"Authorization": "Basic dXNlcjpwYXNzd29yZDEyMw=="}'),
-    ("token en dict", 'cfg = {"token": "ghp_' 'abcdefghijklmnopqrstuvwxyz0123456789"}'),
-    ("token en yaml", 'auth_token: "abcdef1234567890abcdef1234"'),
+    ("token in a dict", 'cfg = {"token": "ghp_' 'abcdefghijklmnopqrstuvwxyz0123456789"}'),
+    ("token in yaml", 'auth_token: "abcdef1234567890abcdef1234"'),
     ("client_secret", 'client_secret = "abcdefghij0123456789ABCDEFGHIJ"'),
     ("passphrase", 'passphrase = "correcthorsebatterystaple"'),
 ]
 
-NO_SON_SECRETOS = [
-    ("desde entorno", 'API_KEY = os.environ["API_KEY"]'),
-    ("desde getenv", 'password = os.getenv("DB_PASSWORD")'),
-    ("desde config", 'token = config.get("token")'),
-    ("placeholder <>", 'password = "<tu-password-aqui>"'),
+NOT_SECRETS = [
+    ("from environment", 'API_KEY = os.environ["API_KEY"]'),
+    ("from getenv", 'password = os.getenv("DB_PASSWORD")'),
+    ("from config", 'token = config.get("token")'),
+    ("placeholder <>", 'password = "<your-password-here>"'),
     ("placeholder xxx", 'api_key = "xxxxxxxxxxxx"'),
     ("placeholder your-", 'secret = "your-secret-here"'),
     ("format string", 'password = "%s"'),
     ("f-string", 'token = f"{prefix}-{suffix}"'),
-    ("vacio", 'password = ""'),
-    ("nombra un campo", 'password_field_name = "password"'),
-    ("comentario", '# password = "esto es un ejemplo"'),
-    ("url sin credencial", 'DB = "postgresql://db.example.com:5432/prod"'),
+    ("empty", 'password = ""'),
+    ("names a field", 'password_field_name = "password"'),
+    ("comment", '# password = "this is an example"'),
+    ("url without credentials", 'DB = "postgresql://db.example.com:5432/prod"'),
     ("import", "from mymodule import secret_manager"),
-    ("literal corto", 'token = "abc"'),
-    ("ruta a fichero", 'key_path = "/etc/ssl/private/server.key"'),
+    ("short literal", 'token = "abc"'),
+    ("path to a file", 'key_path = "/etc/ssl/private/server.key"'),
 ]
 
 
-@pytest.mark.parametrize("etiqueta,contenido", SECRETOS_REALES, ids=[x[0] for x in SECRETOS_REALES])
-def test_detecta_secreto(tmp_path, etiqueta, contenido):
+@pytest.mark.parametrize("label,content", REAL_SECRETS, ids=[x[0] for x in REAL_SECRETS])
+def test_detects_the_secret(tmp_path, label, content):
     from agentes.defensive.config_manager import ConfigManager
     p = tmp_path / "c.py"
-    p.write_text(contenido + "\n", encoding="utf-8")
-    assert ConfigManager.scan_file_for_secrets(str(p)), etiqueta
+    p.write_text(content + "\n", encoding="utf-8")
+    assert ConfigManager.scan_file_for_secrets(str(p)), label
 
 
-@pytest.mark.parametrize("etiqueta,contenido", NO_SON_SECRETOS, ids=[x[0] for x in NO_SON_SECRETOS])
-def test_no_es_falso_positivo(tmp_path, etiqueta, contenido):
+@pytest.mark.parametrize("label,content", NOT_SECRETS, ids=[x[0] for x in NOT_SECRETS])
+def test_is_not_a_false_positive(tmp_path, label, content):
     from agentes.defensive.config_manager import ConfigManager
     p = tmp_path / "c.py"
-    p.write_text(contenido + "\n", encoding="utf-8")
-    assert not ConfigManager.scan_file_for_secrets(str(p)), etiqueta
+    p.write_text(content + "\n", encoding="utf-8")
+    assert not ConfigManager.scan_file_for_secrets(str(p)), label
 
 
-def test_sast_detecta_secretos_en_dict_y_kwargs(tmp_path):
-    """El motor AST detecta secretos también en literales dict y en argumentos con nombre."""
+def test_sast_detects_secrets_in_dicts_and_kwargs(tmp_path):
+    """The AST engine also finds secrets in dict literals and keyword arguments."""
     from agentes.quality.static_checker import StaticCodeAnalyzer
 
-    def halla(code):
+    def finds(code):
         p = tmp_path / (str(abs(hash(code))) + ".py")
         p.write_text(code + "\n", encoding="utf-8")
-        return any("secreto" in i[2].lower() for i in StaticCodeAnalyzer.analyze_python_file(str(p), prefer_bandit=False))
+        return any("secret" in i[2].lower() for i in StaticCodeAnalyzer.analyze_python_file(str(p), prefer_bandit=False))
 
-    assert halla('cfg = {"token": "ghp_abcdefghijklmnopqrstuvwxyz0123"}')
-    assert halla('conectar(password="MiClaveSuperSecreta")')
-    assert halla('self.api_key = "abcdef1234567890abcdef"')
-    assert not halla('API_KEY = os.environ["API_KEY"]')
-    assert not halla('password = "changeme"')
-    assert not halla('password_field_name = "password"')
+    assert finds('cfg = {"token": "ghp_abcdefghijklmnopqrstuvwxyz0123"}')
+    assert finds('connect(password="MySuperSecretPassword")')
+    assert finds('self.api_key = "abcdef1234567890abcdef"')
+    assert not finds('API_KEY = os.environ["API_KEY"]')
+    assert not finds('password = "changeme"')
+    assert not finds('password_field_name = "password"')
 
 
-def test_la_version_no_se_desincroniza():
-    """agentes.__version__ es la fuente única; pyproject la toma de ahí."""
+def test_the_version_cannot_drift():
+    """agentes.__version__ is the single source of truth; pyproject reads it from there."""
     pyproject = open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8").read()
     assert 'version = {attr = "agentes.__version__"}' in pyproject
     assert "\nversion = " not in pyproject.split("[tool.setuptools.dynamic]")[0], \
-        "pyproject no debe fijar la versión a mano"
+        "pyproject must not hardcode the version"
 
 
-def test_cli_expone_version():
+def test_cli_exposes_the_version():
     import subprocess
     r = subprocess.run(
         [sys.executable, os.path.join(ROOT, "agentes_cli.py"), "--version"],
@@ -389,9 +389,9 @@ def test_cli_expone_version():
     assert __version__ in (r.stdout + r.stderr)
 
 
-# --- Integridad de reportes SARIF/HTML y cobertura integral multiarchivo ---
+# --- SARIF/HTML report integrity and multi-file coverage ---
 
-def test_sarif_rutas_relativas_y_html_lista_hallazgos(tmp_path):
+def test_sarif_uses_relative_paths_and_html_lists_findings(tmp_path):
     from agentes.common.reporting import build_pipeline_report, findings_to_sarif, write_html_summary
 
     nested = tmp_path / "pkg" / "mod.py"
@@ -401,8 +401,8 @@ def test_sarif_rutas_relativas_y_html_lista_hallazgos(tmp_path):
     findings = [{
         "file": str(nested),
         "line": 7,
-        "level": "ALTO",
-        "rule_id": "SAST-ALTO",
+        "level": "HIGH",
+        "rule_id": "SAST-HIGH",
         "message": "<script>xss</script>",
     }]
     sarif_path = findings_to_sarif("T", findings, str(tmp_path / "out.sarif"), base_dir=str(tmp_path))
@@ -414,14 +414,14 @@ def test_sarif_rutas_relativas_y_html_lista_hallazgos(tmp_path):
     report["findings"] = findings
     html_path = write_html_summary(report, str(tmp_path / "out.html"))
     html_body = open(html_path, encoding="utf-8").read()
-    assert "Hallazgos (1)" in html_body
+    assert "Findings (1)" in html_body
     assert "pkg/mod.py" in html_body
-    assert "SAST-ALTO" in html_body
+    assert "SAST-HIGH" in html_body
     assert "<script>xss</script>" not in html_body
     assert "&lt;script&gt;xss&lt;/script&gt;" in html_body
 
 
-def test_pipeline_multiarchivo_secrets_metricas_openapi_e_infra(tmp_path):
+def test_multi_file_pipeline_secrets_metrics_openapi_and_infra(tmp_path):
     from agentes.common.orchestrator import run_pipeline
 
     pkg = tmp_path / "app"
@@ -432,7 +432,7 @@ def test_pipeline_multiarchivo_secrets_metricas_openapi_e_infra(tmp_path):
         'router = APIRouter()\n'
         '@router.get("/users")\n'
         'def list_users():\n'
-        '    """Lista usuarios."""\n'
+        '    """List users."""\n'
         '    if True:\n'
         '        return []\n',
         encoding="utf-8",
@@ -442,10 +442,10 @@ def test_pipeline_multiarchivo_secrets_metricas_openapi_e_infra(tmp_path):
         'router = APIRouter()\n'
         '@router.post("/orders")\n'
         'def create_order(item_id: int):\n'
-        '    """Crea orden."""\n'
+        '    """Create an order."""\n'
         '    return {"id": item_id}\n'
         'def get_helper():\n'
-        '    """Helper interno: no es un endpoint aunque empiece por get_."""\n'
+        '    """Internal helper: not an endpoint even though it starts with get_."""\n'
         '    return 1\n',
         encoding="utf-8",
     )
@@ -460,50 +460,50 @@ def test_pipeline_multiarchivo_secrets_metricas_openapi_e_infra(tmp_path):
     )
     assert code == 1
 
-    # El esquema OpenAPI fusiona los endpoints declarados en todos los submódulos del paquete.
+    # The OpenAPI spec merges the endpoints declared across every submodule of the package.
     spec = json.loads((rep_dir / "openapi.json").read_text(encoding="utf-8"))
     assert "/users" in spec["paths"]
     assert "/orders" in spec["paths"]
-    assert "/helper" not in spec["paths"], "en el pipeline solo cuentan los decoradores"
+    assert "/helper" not in spec["paths"], "in the pipeline only decorators declare routes"
 
-    # Los archivos de entorno (.env) se analizan junto al código Python para detectar credenciales expuestas.
+    # .env files are scanned alongside the Python code for exposed credentials.
     secrets_stage = next(s for s in report["stages"] if s["name"] == "defensive_secrets")
     assert secrets_stage["extra_config_files"] >= 1
     assert any(f["rule_id"] == "SECRET" and f["file"].endswith(".env") for f in report["findings"])
 
-    # Las métricas estructurales se agregan sobre la totalidad de módulos del proyecto, no solo __init__.py.
+    # Structural metrics aggregate every module in the project, not just __init__.py.
     metrics_stage = next(s for s in report["stages"] if s["name"] == "refactor_metrics")
     assert metrics_stage["metrics"]["functions_count"] == 3
 
-    # Los manifiestos de contenedores y dependencias se procesan dentro del análisis integral.
+    # Container and dependency manifests are part of the full analysis.
     infra_stage = next(s for s in report["stages"] if s["name"] == "infra_and_deps")
     assert infra_stage["files_scanned"] >= 2
     assert any(f["rule_id"] == "DOCKERFILE" for f in report["findings"])
     assert any(f["rule_id"] == "DEPS-PIP" for f in report["findings"])
 
 
-def test_sast_annassign_y_descuento_self_cls(tmp_path):
+def test_sast_annotated_assignment_and_self_cls_are_not_counted(tmp_path):
     from agentes.quality.static_checker import StaticCodeAnalyzer
 
     p = tmp_path / "ann.py"
     p.write_text(
         'API_KEY: str = "supersecretvalue123"\n'
         'class Svc:\n'
-        '    def metodo(self, a, b, c, d, e):\n'
-        '        """Cinco params reales aparte de self."""\n'
+        '    def method(self, a, b, c, d, e):\n'
+        '        """Five real parameters besides self."""\n'
         '        return a\n'
         '    @classmethod\n'
-        '    def construir(cls, a, b, c, d, e):\n'
-        '        """Cinco params reales aparte de cls."""\n'
+        '    def build(cls, a, b, c, d, e):\n'
+        '        """Five real parameters besides cls."""\n'
         '        return a\n',
         encoding="utf-8",
     )
     issues = StaticCodeAnalyzer.analyze_python_file(str(p), prefer_bandit=False)
     assert any("API_KEY" in msg for _, _, msg in issues)
-    assert not any("argumentos" in msg for _, _, msg in issues)
+    assert not any("arguments" in msg for _, _, msg in issues)
 
 
-def test_dependency_auditor_extras_y_marcadores(tmp_path):
+def test_dependency_auditor_extras_and_markers(tmp_path):
     from agentes.quality.dependency_auditor import DependencyAuditor
 
     req = tmp_path / "requirements.txt"
@@ -516,16 +516,16 @@ def test_dependency_auditor_extras_y_marcadores(tmp_path):
     assert any("uvicorn[standard]>=0.27" in f[0] for f in findings)
     assert any("requests[security]" in f[0] for f in findings)
 
-    indice = {"uvicorn": ["0.26.0", "0.27.0", "0.30.1", "0.31.0rc1"], "requests": ["2.31.0", "2.32.3"]}
-    _, count = DependencyAuditor.auto_fix_requirements_txt(str(req), index=lambda n: indice[n.split("[")[0]])
+    index = {"uvicorn": ["0.26.0", "0.27.0", "0.30.1", "0.31.0rc1"], "requests": ["2.31.0", "2.32.3"]}
+    _, count = DependencyAuditor.auto_fix_requirements_txt(str(req), index=lambda n: index[n.split("[")[0]])
     assert count == 2
     fixed = req.read_text(encoding="utf-8")
-    # La última versión estable que cumple el rango, no el límite inferior ni una prerrelease.
+    # The latest stable version within the range: neither the lower bound nor a pre-release.
     assert 'uvicorn[standard]==0.30.1 ; python_version >= "3.10" # server' in fixed
     assert 'requests[security]==2.32.3 ; sys_platform != "win32"' in fixed
 
 
-def test_qa_test_generator_clases_y_type_hints(tmp_path):
+def test_qa_test_generator_classes_and_type_hints(tmp_path):
     from agentes.qa.test_generator import QATestGenerator
     from agentes.qa.test_runner import QATestRunner
 
@@ -535,20 +535,20 @@ def test_qa_test_generator_clases_y_type_hints(tmp_path):
         'class Calc:\n'
         '    def __init__(self, base: int = 10):\n'
         '        self.base = base\n'
-        '    def combinar(self, items: List[int], mapa: Dict[str, int], activo: bool):\n'
-        '        return len(items) + len(mapa) + (self.base if activo else 0)\n',
+        '    def combine(self, items: List[int], mapping: Dict[str, int], enabled: bool):\n'
+        '        return len(items) + len(mapping) + (self.base if enabled else 0)\n',
         encoding="utf-8",
     )
     tst = tmp_path / "test_calc_mod.py"
     QATestGenerator.generate_test_suite(str(src), str(tst))
     body = tst.read_text(encoding="utf-8")
 
-    # Verificar que los métodos de instancia se invoquen sobre el objeto instanciado y no como funciones libres.
-    # base tiene valor por defecto: no se pasa y el constructor usa el suyo.
-    assert "result = combinar(" not in body
+    # Instance methods are called on a constructed object, never as free functions.
+    # base has a default value, so it is not passed and the constructor uses its own.
+    assert "result = combine(" not in body
     assert "obj = Calc()" in body
-    # Los contenedores anotados llevan un elemento de su tipo: con uno vacío, items[0] fallaría.
-    assert 'obj.combinar([1], {"sample": 1}, True)' in body
+    # Annotated containers get one element of their type: with an empty one, items[0] would fail.
+    assert 'obj.combine([1], {"sample": 1}, True)' in body
 
     res = QATestRunner.run_unittest_suite(str(tst))
     assert res["tests_run"] == 1
@@ -556,7 +556,7 @@ def test_qa_test_generator_clases_y_type_hints(tmp_path):
     assert res["coverage"]["functions_tested"] == 1
 
 
-def test_refactor_sin_doble_conteo_y_mermaid_valido(tmp_path):
+def test_refactor_does_not_double_count_and_mermaid_is_valid(tmp_path):
     from agentes.refactor.architecture_diagram import ArchitectureDiagramGenerator
     from agentes.refactor.code_metrics import CodeMetricsCalculator
     from agentes.refactor.solid_checker import SOLIDChecker
@@ -590,12 +590,12 @@ def test_refactor_sin_doble_conteo_y_mermaid_valido(tmp_path):
 
     diagram = ArchitectureDiagramGenerator.generate_mermaid_diagram(str(mod))
     assert "+..." not in diagram
-    assert "%% +2 métodos adicionales en Big" in diagram
+    assert "%% +2 more methods in Big" in diagram
 
 
-# --- Controles defensivos de seguridad, manejo de tokens y análisis estático AST ---
+# --- Defensive security controls, token handling and AST static analysis ---
 
-def test_input_sanitizer_path_canonico_y_punto(tmp_path):
+def test_input_sanitizer_canonical_path_and_dot(tmp_path):
     from agentes.defensive.input_sanitizer import InputSanitizer
 
     assert InputSanitizer.sanitize_filename(".") == "file_default"
@@ -608,7 +608,7 @@ def test_input_sanitizer_path_canonico_y_punto(tmp_path):
     assert InputSanitizer.validate_safe_path(str(base), "a\x00b") is None
 
 
-def test_config_manager_env_protegido_y_redaccion_secretos(tmp_path, monkeypatch):
+def test_config_manager_protected_env_and_secret_redaction(tmp_path, monkeypatch):
     from agentes.defensive.config_manager import ConfigManager
 
     monkeypatch.setenv("EXISTING_VAR", "original")
@@ -620,7 +620,7 @@ def test_config_manager_env_protegido_y_redaccion_secretos(tmp_path, monkeypatch
         'LD_PRELOAD=/tmp/evil.so\n'
         'PYTHONPATH=/tmp/evil\n'
         'EXISTING_VAR=override_attempt\n'
-        'SAFE_NEW_VAR=valor_seguro\n',
+        'SAFE_NEW_VAR=safe_value\n',
         encoding="utf-8",
     )
     loaded = ConfigManager.load_env_file(str(env))
@@ -628,7 +628,7 @@ def test_config_manager_env_protegido_y_redaccion_secretos(tmp_path, monkeypatch
     assert "PYTHONPATH" not in loaded
     assert "LD_PRELOAD" not in os.environ
     assert os.environ["EXISTING_VAR"] == "original"
-    assert loaded["SAFE_NEW_VAR"] == "valor_seguro"
+    assert loaded["SAFE_NEW_VAR"] == "safe_value"
 
     secret_val = "ghp_" "16C7e42F292c6912E7710c838347Ae178B4a"
     sec_file = tmp_path / "sec.py"
@@ -639,14 +639,14 @@ def test_config_manager_env_protegido_y_redaccion_secretos(tmp_path, monkeypatch
     assert "***REDACTED***" in hits[0][2]
 
 
-def test_auth_manager_alg_none_sin_fuga_y_rate_limiter_acotado():
+def test_auth_manager_rejects_alg_none_without_leaks_and_bounds_the_rate_limiter():
     import base64
     import hashlib
     import hmac
 
     from agentes.defensive.auth_manager import AuthManager, RateLimiter
 
-    # Un token con algoritmo 'none' debe rechazarse explícitamente incluso si la firma HMAC coincide.
+    # A token with algorithm 'none' must be rejected explicitly, even when the HMAC signature matches.
     hdr = base64.urlsafe_b64encode(b'{"alg":"none","typ":"JWT"}').decode().rstrip("=")
     pld = base64.urlsafe_b64encode(b'{"user":"admin"}').decode().rstrip("=")
     sig = base64.urlsafe_b64encode(
@@ -654,9 +654,9 @@ def test_auth_manager_alg_none_sin_fuga_y_rate_limiter_acotado():
     ).decode().rstrip("=")
     ok, _, msg = AuthManager.verify_secure_token(f"{hdr}.{pld}.{sig}", "secret")
     assert not ok
-    assert "Algoritmo" in msg
+    assert "algorithm" in msg
 
-    # Los mensajes de rechazo hacia el consumidor no deben exponer trazas de pila ni detalles internos.
+    # Rejection messages returned to the caller must not expose stack traces or internal details.
     ok_bad, _, msg_bad = AuthManager.verify_secure_token("aaa.bbb.ccc", "secret")
     assert not ok_bad
     assert "Traceback" not in msg_bad
@@ -667,7 +667,7 @@ def test_auth_manager_alg_none_sin_fuga_y_rate_limiter_acotado():
     assert len(rl.requests) <= 3
 
 
-def test_sast_reglas_seguridad_y_concurrencia(tmp_path):
+def test_sast_security_and_concurrency_rules(tmp_path):
     from agentes.quality.static_checker import StaticCodeAnalyzer
 
     code = (
@@ -708,27 +708,27 @@ def test_sast_reglas_seguridad_y_concurrencia(tmp_path):
     assert any("random" in m and "secrets" in m for m in msgs)
     assert any("Path.resolve" in m for m in msgs)
     assert any("context manager" in m for m in msgs)
-    assert any("defecto mutable" in m for m in msgs)
+    assert any("mutable default" in m for m in msgs)
     assert any("except Exception: pass" in m for m in msgs)
     assert any("async def" in m for m in msgs)
 
-    # Comprobar que el archivo existe y después escribirlo es una condición de carrera TOCTOU.
-    # Leerlo no: lo peor que pasa es un FileNotFoundError.
+    # Checking that the file exists and then writing it is a TOCTOU race condition.
+    # Reading it is not: the worst outcome is a FileNotFoundError.
     p2 = tmp_path / "toctou.py"
     p2.write_text(
         'import os\n'
-        'def leer(ruta):\n'
-        '    """Lee."""\n'
-        '    if os.path.exists(ruta):\n'
-        '        with open(ruta) as f:\n'
+        'def read(path):\n'
+        '    """Read."""\n'
+        '    if os.path.exists(path):\n'
+        '        with open(path) as f:\n'
         '            return f.read()\n'
-        'def crear(ruta, modo):\n'
-        '    """Crea."""\n'
-        '    if not os.path.exists(ruta):\n'
-        '        with open(ruta, "w") as f:\n'
+        'def create(path, mode):\n'
+        '    """Create."""\n'
+        '    if not os.path.exists(path):\n'
+        '        with open(path, "w") as f:\n'
         '            f.write("x")\n'
-        '    if os.path.isfile(ruta):\n'
-        '        with open(ruta, mode=modo) as f:\n'
+        '    if os.path.isfile(path):\n'
+        '        with open(path, mode=mode) as f:\n'
         '            f.write("y")\n',
         encoding="utf-8",
     )
@@ -737,39 +737,39 @@ def test_sast_reglas_seguridad_y_concurrencia(tmp_path):
     assert not any("context manager" in m for _, _, m in issues2)
 
 
-# --- Reglas arquitectónicas SOLID, contratos de memoria e higiene de fiabilidad y rendimiento ---
+# --- SOLID architecture rules, memory contracts, reliability and performance hygiene ---
 
-def test_solid_checker_arquitectura_y_fiabilidad(tmp_path):
+def test_solid_checker_architecture_and_reliability(tmp_path):
     from agentes.refactor.solid_checker import SOLIDChecker
 
     bad = tmp_path / "arch_bad.py"
     bad.write_text(
         'from dataclasses import dataclass\n'
-        'ESTADO = 0\n'
+        'STATE = 0\n'
         '@dataclass\n'
-        'class ConfigSinSlots:\n'
-        '    nombre: str\n'
+        'class ConfigWithoutSlots:\n'
+        '    name: str\n'
         '@dataclass(frozen=True, slots=True)\n'
-        'class ConfigInmutable:\n'
-        '    nombre: str\n'
-        'def anidada(a, b, items=[]):\n'
-        '    global ESTADO\n'
+        'class ImmutableConfig:\n'
+        '    name: str\n'
+        'def nested(a, b, items=[]):\n'
+        '    global STATE\n'
         '    if a:\n'
         '        for x in items:\n'
         '            while b:\n'
         '                if x > 0:\n'
-        '                    ESTADO += 1\n'
-        'def fallos(v):\n'
+        '                    STATE += 1\n'
+        'def failures(v):\n'
         '    try:\n'
         '        return int(v)\n'
         '    except ValueError:\n'
-        '        raise RuntimeError("sin from")\n'
-        'def silencia(v):\n'
+        '        raise RuntimeError("no from")\n'
+        'def silences(v):\n'
         '    try:\n'
         '        return int(v)\n'
         '    except Exception:\n'
         '        return None\n'
-        'def plano_elif(op):\n'
+        'def flat_elif(op):\n'
         '    if op == 1:\n'
         '        return 1\n'
         '    elif op == 2:\n'
@@ -789,33 +789,33 @@ def test_solid_checker_arquitectura_y_fiabilidad(tmp_path):
     assert "STATE-SAFETY" in principles
     assert "DATA-CONTRACT" in principles
 
-    # Las cadenas elif evalúan al mismo nivel de profundidad lógica: activan OCP sin inflar GUARD.
-    assert not any(p == "GUARD" and "plano_elif" in msg for _, p, _, msg in findings)
-    # Una clase dataclass con slots=True elimina __dict__ por instancia y queda exenta de DATA-CONTRACT.
-    assert not any(p == "DATA-CONTRACT" and "ConfigInmutable" in msg for _, p, _, msg in findings)
-    # Verificar que el auditor identifique simultáneamente estado global mutable y parámetros mutables por defecto.
+    # An elif chain sits at a single logical depth: it may trigger OCP but must not inflate GUARD.
+    assert not any(p == "GUARD" and "flat_elif" in msg for _, p, _, msg in findings)
+    # A dataclass with slots=True has no per-instance __dict__, so DATA-CONTRACT does not apply.
+    assert not any(p == "DATA-CONTRACT" and "ImmutableConfig" in msg for _, p, _, msg in findings)
+    # The auditor reports both global mutable state and mutable default parameters.
     state_msgs = [msg for _, p, _, msg in findings if p == "STATE-SAFETY"]
-    assert any("defecto mutable" in m for m in state_msgs)
+    assert any("Mutable default" in m for m in state_msgs)
     assert any("global" in m for m in state_msgs)
-    # Tanto relanzar sin preservar __cause__ como retornar None en un ExceptHandler degradan la observabilidad.
+    # Re-raising without keeping __cause__ and returning None from a handler both hurt observability.
     exc_msgs = [msg for _, p, _, msg in findings if p == "EXCEPTION-HYGIENE"]
     assert any("from exc" in m for m in exc_msgs)
-    assert any("silenciosamente" in m for m in exc_msgs)
+    assert any("silently" in m for m in exc_msgs)
 
-    # El encadenamiento explícito con 'from exc' conserva la excepción origen y no se marca.
+    # Explicit chaining with 'from exc' keeps the original exception and is not flagged.
     good_chain = tmp_path / "chain_ok.py"
     good_chain.write_text(
         'def parse(v):\n'
         '    try:\n'
         '        return int(v)\n'
         '    except ValueError as exc:\n'
-        '        raise RuntimeError("invalido") from exc\n',
+        '        raise RuntimeError("invalid") from exc\n',
         encoding="utf-8",
     )
     assert not any(p == "EXCEPTION-HYGIENE" for _, p, _, _ in SOLIDChecker.audit_file(str(good_chain)))
 
 
-def test_code_metrics_rendimiento_memoria_e_io(tmp_path):
+def test_code_metrics_performance_memory_and_io(tmp_path):
     from agentes.refactor.code_metrics import CodeMetricsCalculator
     from agentes.refactor.refactor_suggester import RefactorSuggester
     from agentes.refactor.solid_checker import SOLIDChecker
@@ -823,13 +823,13 @@ def test_code_metrics_rendimiento_memoria_e_io(tmp_path):
     perf_file = tmp_path / "perf_issues.py"
     perf_file.write_text(
         'import re, time, requests\n'
-        'def cuello_botella(items, path, cur):\n'
+        'def bottleneck(items, path, cur):\n'
         '    out = ""\n'
-        '    cola = list(items)\n'
-        '    while cola:\n'
-        '        first = cola.pop(0)\n'
+        '    queue = list(items)\n'
+        '    while queue:\n'
+        '        first = queue.pop(0)\n'
         '        if first is None:\n'
-        '            cola.insert(0, first)\n'
+        '            queue.insert(0, first)\n'
         '    with open(path) as f:\n'
         '        lines = f.readlines()\n'
         '    for item in items:\n'
@@ -839,7 +839,7 @@ def test_code_metrics_rendimiento_memoria_e_io(tmp_path):
         '            requests.get("https://example.com", timeout=5)\n'
         '            cur.execute("SELECT 1")\n'
         '    return out, lines\n'
-        'async def tarea():\n'
+        'async def task():\n'
         '    time.sleep(0.1)\n',
         encoding="utf-8",
     )
@@ -849,9 +849,9 @@ def test_code_metrics_rendimiento_memoria_e_io(tmp_path):
     assert perf == CodeMetricsCalculator.audit_performance(str(perf_file))
 
     categories = {cat for _, cat, _, _ in perf}
-    assert "IMPACTO ALTO - COMPLEJIDAD BIG-O" in categories
-    assert "IMPACTO MEDIO - HUELLA DE MEMORIA" in categories
-    assert "IMPACTO ALTO - I/O BLOQUEANTE" in categories
+    assert "HIGH IMPACT - BIG-O COMPLEXITY" in categories
+    assert "MEDIUM IMPACT - MEMORY FOOTPRINT" in categories
+    assert "HIGH IMPACT - BLOCKING I/O" in categories
 
     msgs = [m for _, _, _, m in perf]
     assert any(".pop(0)" in m for m in msgs)
@@ -861,40 +861,40 @@ def test_code_metrics_rendimiento_memoria_e_io(tmp_path):
     assert any(".readlines()" in m for m in msgs)
     assert any("join" in m for m in msgs)
     assert any("async def" in m and "time.sleep" in m for m in msgs)
-    assert any("Connection Pooling" in m or "Session" in m for m in msgs)
+    assert any("connection pooling" in m or "Session" in m for m in msgs)
     assert any("N+1" in m for m in msgs)
 
     solid_findings = SOLIDChecker.audit_file(str(perf_file))
     recs = RefactorSuggester.generate_recommendations(metrics, solid_findings)
-    assert any("[IMPACTO ALTO - COMPLEJIDAD BIG-O" in r for r in recs)
-    assert any("[IMPACTO MEDIO - HUELLA DE MEMORIA" in r for r in recs)
-    assert any("[IMPACTO ALTO - I/O BLOQUEANTE" in r for r in recs)
+    assert any("[HIGH IMPACT - BIG-O COMPLEXITY" in r for r in recs)
+    assert any("[MEDIUM IMPACT - MEMORY FOOTPRINT" in r for r in recs)
+    assert any("[HIGH IMPACT - BLOCKING I/O" in r for r in recs)
 
 
-def test_refactor_recomendaciones_situan_cada_aviso():
-    """Sin archivo se indica la línea; con location, el archivo y la línea."""
+def test_refactor_recommendations_locate_every_warning():
+    """Without a file the line is given; with location, the file and the line."""
     from agentes.refactor.refactor_suggester import RefactorSuggester
 
     metrics = {"comment_ratio": 0.0, "code_loc": 80, "avg_cyclomatic_complexity": 7.0,
-               "performance_findings": [(9, "IMPACTO MEDIO - HUELLA DE MEMORIA", "MEDIO", "readlines")]}
-    solid = [(7, "SRP", "MEDIO", "Clase grande")]
+               "performance_findings": [(9, "MEDIUM IMPACT - MEMORY FOOTPRINT", "MEDIUM", "readlines")]}
+    solid = [(7, "SRP", "MEDIUM", "Big class")]
 
-    sueltas = RefactorSuggester.generate_recommendations(metrics, solid)
-    assert any(r.startswith("[DISEÑO SRP - Línea 7]") for r in sueltas)
-    assert any(r.startswith("[IMPACTO MEDIO - HUELLA DE MEMORIA - Línea 9]") for r in sueltas)
+    bare = RefactorSuggester.generate_recommendations(metrics, solid)
+    assert any(r.startswith("[DESIGN SRP - Line 7]") for r in bare)
+    assert any(r.startswith("[MEDIUM IMPACT - MEMORY FOOTPRINT - Line 9]") for r in bare)
 
-    situadas = RefactorSuggester.generate_recommendations(metrics, solid, location="pkg/mod.py")
-    assert any(r.startswith("[DISEÑO SRP - pkg/mod.py:7]") for r in situadas)
-    assert any(r.startswith("[IMPACTO MEDIO - HUELLA DE MEMORIA - pkg/mod.py:9]") for r in situadas)
-    # Las recomendaciones de todo el archivo también dicen de cuál son.
-    assert any(r.startswith("[REFACTOR - pkg/mod.py]") for r in situadas)
-    assert any(r.startswith("[DOCUMENTACION - pkg/mod.py]") for r in situadas)
-    assert not any("Línea" in r for r in situadas)
+    located = RefactorSuggester.generate_recommendations(metrics, solid, location="pkg/mod.py")
+    assert any(r.startswith("[DESIGN SRP - pkg/mod.py:7]") for r in located)
+    assert any(r.startswith("[MEDIUM IMPACT - MEMORY FOOTPRINT - pkg/mod.py:9]") for r in located)
+    # Whole-file recommendations say which file they are about too.
+    assert any(r.startswith("[REFACTOR - pkg/mod.py]") for r in located)
+    assert any(r.startswith("[DOCUMENTATION - pkg/mod.py]") for r in located)
+    assert not any("Line" in r for r in located)
 
 
-# --- Auditoría de testabilidad, generación adversaria y calidad de suites de prueba ---
+# --- Testability audit, adversarial generation and test-suite quality ---
 
-def test_qa_testability_audit_y_matriz_escenarios(tmp_path):
+def test_qa_testability_audit_and_scenario_matrix(tmp_path):
     from agentes.qa.test_generator import QATestGenerator
 
     src = tmp_path / "smelly_service.py"
@@ -903,18 +903,18 @@ def test_qa_testability_audit_y_matriz_escenarios(tmp_path):
         'CACHE = []\n'
         'class Repo:\n'
         '    pass\n'
-        'def procesar(uid, precio):\n'
+        'def process(uid, price):\n'
         '    global CACHE\n'
         '    repo = Repo()\n'
         '    ts = time.time()\n'
-        '    if precio < 0:\n'
-        '        raise ValueError("Precio negativo")\n'
+        '    if price < 0:\n'
+        '        raise ValueError("Negative price")\n'
         '    r = requests.get(f"https://example.com/{uid}", timeout=5)\n'
         '    CACHE.append((uid, ts, repo, r))\n'
-        '    return precio\n'
+        '    return price\n'
         'async def sync_item(item_id):\n'
         '    if not item_id:\n'
-        '        raise KeyError("id requerido")\n'
+        '        raise KeyError("id required")\n'
         '    return {"id": item_id}\n',
         encoding="utf-8",
     )
@@ -933,13 +933,13 @@ def test_qa_testability_audit_y_matriz_escenarios(tmp_path):
     assert "[ADVERSARIAL / ERROR]" in cats
     assert "[CONCURRENCY / I/O FAULT]" in cats
 
-    # Cada ruta nominal debe generar al menos tres escenarios de frontera, hostiles o de concurrencia.
+    # Every nominal path must yield at least three boundary, hostile or concurrency scenarios.
     happy_count = sum(1 for s in matrix if s["category"] == "[HAPPY PATH]")
     non_happy_count = len(matrix) - happy_count
     assert non_happy_count >= happy_count * 3
 
 
-def test_qa_generate_pytest_suite_ejecutable_y_limpia(tmp_path):
+def test_qa_generated_pytest_suite_runs_and_is_clean(tmp_path):
     import subprocess
 
     from agentes.qa.test_generator import QATestGenerator
@@ -948,17 +948,17 @@ def test_qa_generate_pytest_suite_ejecutable_y_limpia(tmp_path):
     mod = tmp_path / "calc_adv.py"
     mod.write_text(
         'import urllib.request\n'
-        'def sumar(a, b):\n'
+        'def add(a, b):\n'
         '    return a + b\n'
-        'def calcular_descuento(precio, porcentaje):\n'
-        '    if porcentaje < 0 or porcentaje > 100:\n'
-        '        raise ValueError("Porcentaje inválido")\n'
-        '    return precio * (1 - porcentaje / 100)\n'
-        'def descargar(url):\n'
+        'def calculate_discount(price, percent):\n'
+        '    if percent < 0 or percent > 100:\n'
+        '        raise ValueError("Invalid percentage")\n'
+        '    return price * (1 - percent / 100)\n'
+        'def download(url):\n'
         '    if not url:\n'
-        '        raise ValueError("url vacia")\n'
+        '        raise ValueError("empty url")\n'
         '    return urllib.request.urlopen(url, timeout=1).read()\n'
-        'async def tarea_async(uid):\n'
+        'async def async_task(uid):\n'
         '    if uid is None:\n'
         '        return 0\n'
         '    return uid * 2\n',
@@ -976,14 +976,14 @@ def test_qa_generate_pytest_suite_ejecutable_y_limpia(tmp_path):
     assert "autospec=True" in body
     assert "asyncio.CancelledError" in body and "asyncio.gather" in body
 
-    # La suite generada debe superar el propio auditor de calidad sin emitir antipatrones estructurales.
+    # The generated suite must pass the suite quality audit without a single anti-pattern.
     qa_audit = QATestRunner.audit_test_suite_quality(str(test_out))
     assert qa_audit["findings"] == []
     assert qa_audit["uses_parametrize"] is True
     assert qa_audit["uses_fixtures"] is True
     assert qa_audit["assertions_count"] > 0
 
-    # Ejecutar pytest sobre el módulo emitido para validar sintaxis, aislamiento e invariantes en tiempo de ejecución.
+    # Run pytest on the emitted module to check its syntax, isolation and runtime behaviour.
     run = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", str(test_out)],
         capture_output=True,
@@ -993,28 +993,28 @@ def test_qa_generate_pytest_suite_ejecutable_y_limpia(tmp_path):
     assert run.returncode == 0, run.stdout + "\n" + run.stderr
 
 
-def test_qa_runner_audita_antipatrones_sdet(tmp_path):
+def test_qa_runner_audits_sdet_antipatterns(tmp_path):
     from agentes.qa.test_runner import QATestRunner
 
     bad_test = tmp_path / "test_bad_sdet.py"
     bad_test.write_text(
         'import time, pytest, requests\n'
         'from unittest.mock import MagicMock, patch\n'
-        'def test_vacio():\n'
+        'def test_empty():\n'
         '    x = 1 + 1\n'
-        'def test_tautologia_y_raises():\n'
+        'def test_tautology_and_raises():\n'
         '    assert True\n'
         '    with pytest.raises(Exception):\n'
         '        int("x")\n'
         '    with pytest.raises(ValueError):\n'
         '        int("y")\n'
-        'def test_io_sin_mock():\n'
+        'def test_io_without_mock():\n'
         '    time.sleep(0.01)\n'
         '    requests.get("https://example.com", timeout=1)\n'
         '    assert 1 == 1\n'
-        'def test_mock_fragil():\n'
+        'def test_fragile_mock():\n'
         '    m = MagicMock()\n'
-        '    with patch("mod._interno"):\n'
+        '    with patch("mod._internal"):\n'
         '        assert m is not None\n',
         encoding="utf-8",
     )
@@ -1027,16 +1027,16 @@ def test_qa_runner_audita_antipatrones_sdet(tmp_path):
     assert "UNSAFE-MOCK" in codes
 
 
-def test_api_contract_adversarial_y_reporte_sdet(tmp_path):
+def test_api_contract_adversarial_payloads_and_sdet_report(tmp_path):
     from agentes.qa.api_contract_testing import APIContractTester
     from agentes.qa.qa_reporter import QAReporter
 
-    # Un SLA negativo, NaN o infinito carece de semántica temporal válida y debe rechazarse en la validación.
+    # A negative, NaN or infinite latency has no meaning as a duration and must fail validation.
     for bad_ms in (-5.0, float("nan"), float("inf")):
         res = APIContractTester.validate_api_response("/x", 200, {}, {}, bad_ms, expected_status=200, max_sla_ms=500.0)
         assert not res["passed"]
 
-    # Validar coincidencia insensible a mayúsculas en cabeceras esperadas y detección de cabeceras ausentes.
+    # Expected headers match case-insensitively, and missing headers are detected.
     hdr_ok = APIContractTester.validate_api_response(
         "/x", 200, {"ok": True}, {"Content-Type": "application/json; charset=utf-8"}, 10.0,
         expected_headers={"content-type": "application/json"},
@@ -1048,12 +1048,12 @@ def test_api_contract_adversarial_y_reporte_sdet(tmp_path):
     )
     assert not hdr_fail["passed"]
 
-    # Verificar que la batería adversaria cubra estructuras vacías, tipos incompatibles, valores nulos y extremos numéricos.
+    # The adversarial set covers empty structures, wrong types, nulls and numeric extremes.
     payloads = APIContractTester.generate_adversarial_payloads({"id": int, "score": float, "name": str, "tags": list})
     labels = {name for name, _ in payloads}
     assert {"empty_payload", "non_dict_null", "null_fields", "bool_as_int_or_type_trap", "extreme_nan_giant"}.issubset(labels)
 
-    # Escapar secuencias HTML activas al renderizar nombres de endpoints en el informe.
+    # Active HTML in endpoint names is escaped when the report is rendered.
     html_p = QAReporter.generate_html_report(
         {"tests_run": 1, "passed": 1, "failures": 0, "errors": 0, "pass_rate_percentage": 100.0},
         [{"endpoint": "<script>alert(1)</script>", "elapsed_ms": 5, "passed": True}],
@@ -1063,7 +1063,7 @@ def test_api_contract_adversarial_y_reporte_sdet(tmp_path):
     assert "<script>alert(1)</script>" not in html_body
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_body
 
-    # Confirmar que el informe integral organiza testabilidad, matriz de escenarios y suite generada en secciones diferenciadas.
+    # The full report has separate sections for testability, the scenario matrix and the generated suite.
     fixture = os.path.join(ROOT, "agentes", "qa", "fixtures", "sample_app.py")
     rpt = QAReporter.generate_adversarial_qa_report(
         fixture,
@@ -1071,17 +1071,17 @@ def test_api_contract_adversarial_y_reporte_sdet(tmp_path):
         str(tmp_path / "qa_adv.md"),
     )
     md = open(rpt, encoding="utf-8").read()
-    assert "## 1. Defectos de Testabilidad (Code Smells para QA)" in md
-    assert "## 2. Matriz de Escenarios de Prueba" in md
-    assert "## 3. Suite de Pruebas Lista para Producción" in md
+    assert "## 1. Testability Defects (QA Code Smells)" in md
+    assert "## 2. Test Scenario Matrix" in md
+    assert "## 3. Production-Ready Test Suite" in md
 
 
-def test_orchestrator_excluye_venv_custom_y_caches(tmp_path):
+def test_orchestrator_skips_custom_venvs_and_caches(tmp_path):
     from agentes.common.orchestrator import run_pipeline
 
     (tmp_path / "app.py").write_text('def ok():\n    """Ok."""\n    return 1\n', encoding="utf-8")
 
-    # Simular entornos virtuales con nombre arbitrario o marcador pyvenv.cfg junto con directorios de caché.
+    # Virtual environments with arbitrary names or a pyvenv.cfg marker, plus tool cache directories.
     v313 = tmp_path / "venv313"
     v313.mkdir()
     (v313 / "leak.py").write_text('API_KEY = "ghp_' '16C7e42F292c6912E7710c838347Ae178B4a"\n', encoding="utf-8")
@@ -1107,13 +1107,13 @@ def test_orchestrator_excluye_venv_custom_y_caches(tmp_path):
     assert not any("venv313" in f["file"] or "custom_env" in f["file"] or ".mypy_cache" in f["file"] for f in report["findings"])
 
 
-def test_precision_heuristica_sin_falsos_positivos(tmp_path):
+def test_heuristic_precision_without_false_positives(tmp_path):
     from agentes.defensive.config_manager import ConfigManager
     from agentes.qa.test_generator import QATestGenerator
     from agentes.quality.static_checker import StaticCodeAnalyzer
     from agentes.refactor.solid_checker import SOLIDChecker
 
-    # El escáner de secretos descarta etiquetas UI y constantes autodescriptivas sin omitir credenciales reales.
+    # The secret scanner ignores UI labels and self-describing constants without missing real credentials.
     ui_py = tmp_path / "ui.py"
     ui_py.write_text(
         'Label("Password:", classes="field-label")\n'
@@ -1141,10 +1141,10 @@ def test_precision_heuristica_sin_falsos_positivos(tmp_path):
     assert len(hits_test_secret) == 1
     assert hits_test_secret[0][0] == 2
 
-    # El analizador estático omite reglas de documentación, aserciones y secretos genéricos dentro de suites de prueba.
+    # Inside test suites the static analyser skips the docstring, assert and generic-secret rules.
     test_sast = tmp_path / "test_sample.py"
     test_sast.write_text(
-        'def test_algo():\n'
+        'def test_something():\n'
         '    token = "dummy_token_value_123456"\n'
         '    assert token.startswith("dummy")\n',
         encoding="utf-8",
@@ -1164,12 +1164,12 @@ def test_precision_heuristica_sin_falsos_positivos(tmp_path):
     assert "test_helper" not in msgs_prod
     assert "assert" in msgs_prod
 
-    # La auditoría de testabilidad restringe HARDCODED-DEP a clientes, servicios y repositorios externos concretos.
+    # The testability audit limits HARDCODED-DEP to concrete external clients, services and repositories.
     widgets_py = tmp_path / "widgets.py"
     widgets_py.write_text(
         'def render():\n'
         '    t = Table()\n'
-        '    p = Panel("hola")\n'
+        '    p = Panel("hello")\n'
         '    lbl = Label("ok")\n'
         '    parser = ArgumentParser()\n'
         '    client = OpenAIClient()\n'
@@ -1186,7 +1186,7 @@ def test_precision_heuristica_sin_falsos_positivos(tmp_path):
     for widget in ("Table", "Panel", "Label", "ArgumentParser", "SystemExit"):
         assert widget not in hardcoded_msgs
 
-    # El encadenamiento de excepciones exime relanzamientos directos de la variable capturada y salidas de proceso controladas.
+    # Exception chaining is not required when re-raising the caught variable or raising a controlled process exit.
     exc_py = tmp_path / "exc_cases.py"
     exc_py.write_text(
         'def f():\n'
@@ -1208,7 +1208,7 @@ def test_precision_heuristica_sin_falsos_positivos(tmp_path):
         '    try:\n'
         '        return 1\n'
         '    except ValueError:\n'
-        '        raise RuntimeError("fallo")\n',
+        '        raise RuntimeError("failure")\n',
         encoding="utf-8",
     )
     solid_findings = SOLIDChecker.audit_file(str(exc_py))
@@ -1217,30 +1217,30 @@ def test_precision_heuristica_sin_falsos_positivos(tmp_path):
     assert hygiene[0][0] == 20
 
 
-def test_parse_env_file_y_audit_env_no_mutan_environ(tmp_path, monkeypatch):
+def test_parse_env_file_and_audit_env_leave_environ_untouched(tmp_path, monkeypatch):
     from agentes.common import audits
     from agentes.defensive.config_manager import ConfigManager
 
     env_path = tmp_path / ".env"
-    env_path.write_text('CUSTOM_APP_TOKEN="secreto1234567890"\nDEBUG=true\n', encoding="utf-8")
+    env_path.write_text('CUSTOM_APP_TOKEN="secret1234567890"\nDEBUG=true\n', encoding="utf-8")
     monkeypatch.delenv("CUSTOM_APP_TOKEN", raising=False)
-    monkeypatch.setenv("KEEP_EXISTING_ENV", "intacto")
+    monkeypatch.setenv("KEEP_EXISTING_ENV", "intact")
 
     parsed = ConfigManager.parse_env_file(str(env_path))
-    assert parsed == {"CUSTOM_APP_TOKEN": "secreto1234567890", "DEBUG": "true"}
+    assert parsed == {"CUSTOM_APP_TOKEN": "secret1234567890", "DEBUG": "true"}
     assert "CUSTOM_APP_TOKEN" not in os.environ
 
     def _forbid_load(*_args, **_kwargs):
-        raise AssertionError("audit_env no debe invocar load_env_file ni mutar os.environ")
+        raise AssertionError("audit_env must neither call load_env_file nor modify os.environ")
 
     monkeypatch.setattr(ConfigManager, "load_env_file", staticmethod(_forbid_load))
     findings = audits.audit_env(str(env_path))
     assert findings
-    assert os.environ.get("KEEP_EXISTING_ENV") == "intacto"
+    assert os.environ.get("KEEP_EXISTING_ENV") == "intact"
     assert "CUSTOM_APP_TOKEN" not in os.environ
 
 
-def test_prometheus_exporter_conteo_exacto_y_concurrencia():
+def test_prometheus_exporter_exact_counts_under_concurrency():
     import threading
     import urllib.error
     import urllib.request
@@ -1279,13 +1279,13 @@ def test_prometheus_exporter_conteo_exacto_y_concurrencia():
         state["healthy"] = False
         with ThreadPoolExecutor(max_workers=6) as pool:
             statuses_503 = [f.result() for f in [pool.submit(fetch, "/healthz") for _ in range(4)]]
-            statuses_404 = [f.result() for f in [pool.submit(fetch, "/no-existe") for _ in range(4)]]
+            statuses_404 = [f.result() for f in [pool.submit(fetch, "/missing") for _ in range(4)]]
         assert statuses_503 == [503] * 4
         assert statuses_404 == [404] * 4
 
         assert fetch("/metrics") == 200
         metrics_text = PrometheusExporter.generate_metrics()
-        # 10 (/healthz 200) + 4 (/healthz 503) + 4 (/no-existe 404) + 1 (/metrics 200) = 19 peticiones, 8 errores
+        # 10 (/healthz 200) + 4 (/healthz 503) + 4 (/missing 404) + 1 (/metrics 200) = 19 requests, 8 errors
         assert "app_requests_total 19\n" in metrics_text
         assert "app_requests_errors_total 8\n" in metrics_text
     finally:
@@ -1295,16 +1295,17 @@ def test_prometheus_exporter_conteo_exacto_y_concurrencia():
         PrometheusExporter.reset()
 
 
-def test_sarif_reglas_granulares_y_driver_rules(tmp_path):
+def test_sarif_specific_rules_and_driver_rules(tmp_path):
     from agentes import __version__
     from agentes.common.reporting import findings_to_sarif
 
     findings = [
-        {"file": "a.py", "line": 2, "level": "CRITICO", "rule_id": "SAST-CRITICO", "message": "Uso de función de riesgo dinámico 'eval()'."},
-        {"file": "a.py", "line": 5, "level": "ALTO", "rule_id": "SAST-ALTO", "message": "Posible SQL injection: f-string en execute()."},
-        {"file": "b.py", "line": 3, "level": "ALTO", "rule_id": "SECRET", "message": "Token de GitHub: ghp***REDACTED***"},
-        {"file": "b.py", "line": 4, "level": "ALTO", "rule_id": "SECRET", "message": "Clave de acceso AWS (AKIA): AKI***REDACTED***"},
-        {"file": "deploy.yaml", "line": 1, "level": "ALTO", "rule_id": "K8S-WORKLOAD", "message": "Falta runAsNonRoot"},
+        {"file": "a.py", "line": 2, "level": "CRITICAL", "rule_id": "SAST-CRITICAL",
+         "message": "Use of the dynamic code execution function 'eval()'."},
+        {"file": "a.py", "line": 5, "level": "HIGH", "rule_id": "SAST-HIGH", "message": "Possible SQL injection: f-string in execute()."},
+        {"file": "b.py", "line": 3, "level": "HIGH", "rule_id": "SECRET", "message": "GitHub token: ghp***REDACTED***"},
+        {"file": "b.py", "line": 4, "level": "HIGH", "rule_id": "SECRET", "message": "AWS access key (AKIA): AKI***REDACTED***"},
+        {"file": "deploy.yaml", "line": 1, "level": "HIGH", "rule_id": "K8S-WORKLOAD", "message": "Missing runAsNonRoot"},
     ]
     out = findings_to_sarif("AGENTES-Pipeline", findings, str(tmp_path / "out.sarif"))
     sarif = json.loads(open(out, encoding="utf-8").read())
@@ -1316,7 +1317,7 @@ def test_sarif_reglas_granulares_y_driver_rules(tmp_path):
     assert set(rule_ids) <= declared
 
 
-def test_github_actions_generator_moderno(tmp_path):
+def test_github_actions_generator_is_current(tmp_path):
     from agentes.devops.github_actions_generator import GitHubActionsGenerator
 
     wf = tmp_path / "devsecops.yml"
@@ -1329,7 +1330,7 @@ def test_github_actions_generator_moderno(tmp_path):
     assert "bandit" in text
 
 
-def test_submodulos_modularizados_cli_y_qa_importables():
+def test_cli_and_qa_submodules_are_importable():
     import importlib
 
     cli_mods = ("common", "analyze", "generate", "testing", "ops", "parser")

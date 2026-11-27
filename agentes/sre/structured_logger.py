@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 
 class StructuredLogger:
     """
-    Formateador de logs estructurados en JSON en cumplimiento con estándares SRE/Observabilidad.
-    Enriquece cada registro con ISO 8601, trace_id, level y enmascaramiento de datos sensibles.
+    Structured JSON log formatter. Each entry carries an ISO 8601 UTC timestamp, the service
+    name, the level and a trace_id, and sensitive context keys are masked at any depth.
     """
 
     SENSITIVE_KEYS = {"password", "secret", "token", "authorization", "api_key"}
@@ -16,6 +16,7 @@ class StructuredLogger:
         self.service_name = service_name
 
     def _mask_sensitive_data(self, data: Any) -> Any:
+        """Copy of data with the values of SENSITIVE_KEYS (case-insensitive) replaced, recursively."""
         if isinstance(data, dict):
             masked = {}
             for k, v in data.items():
@@ -36,7 +37,7 @@ class StructuredLogger:
         trace_id: Optional[str] = None
     ) -> str:
         """
-        Formatea un mensaje de log en una cadena JSON estandarizada.
+        Format one log entry as a JSON string. A fresh trace_id is generated when none is given.
         """
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         log_entry = {

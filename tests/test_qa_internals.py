@@ -1,10 +1,10 @@
 """
-Piezas internas del agente qa: el intérprete que calcula los resultados esperados, la
-grabación, las reglas de calidad de suites, los valores de muestra y la fachada del generador.
+Internals of the qa agent: the interpreter that computes expected results, recording, the
+suite quality rules, the sample values and the generator facade.
 
-El intérprete se prueba contra Python: para cada caso, el resultado estático tiene que ser el
-mismo que da ejecutar la función, y en lo que no sabe evaluar tiene que rendirse (None) en vez
-de inventar un valor que el test generado afirmaría.
+The interpreter is tested against Python itself: for each case the static outcome must equal
+what running the function produces, and for anything it cannot evaluate it must give up (None)
+rather than invent a value the generated test would then assert.
 """
 import ast
 import os
@@ -33,90 +33,90 @@ def _arg_names(func: ast.FunctionDef):
 
 
 def _real_outcome(src: str, samples):
-    """Lo que da ejecutar la función de verdad, con la misma forma que static_outcome."""
+    """What really running the function produces, in the same shape as static_outcome."""
     namespace: dict = {}
-    exec(compile(src, "<caso>", "exec"), namespace)  # agentes: ignore[dynamic-exec] - código fijo del propio test
+    exec(compile(src, "<case>", "exec"), namespace)  # agentes: ignore[dynamic-exec] - fixed code written by this test
     args = [ast.literal_eval(s) for s in samples]
     try:
         value = namespace["f"](*args)
-    except Exception as exc:  # noqa: BLE001 - el tipo de la excepción es justo lo que se compara
+    except Exception as exc:  # noqa: BLE001 - the exception type is exactly what is being compared
         return ("raises", type(exc).__name__, str(exc))
     return ("value", repr(value), "")
 
 
-# --- Intérprete estático ------------------------------------------------------------------
+# --- Static interpreter -------------------------------------------------------------------
 
-EVALUABLES = {
-    "subíndice": ("def f(x):\n    return x[1]", ["[1, 2, 3]"]),
+EVALUABLE = {
+    "subscript": ("def f(x):\n    return x[1]", ["[1, 2, 3]"]),
     "slice": ("def f(x):\n    return x[1:3]", ["[1, 2, 3]"]),
-    "slice con paso": ("def f(x):\n    return x[::-1]", ["'abc'"]),
-    "tupla, lista y set": ("def f(x):\n    return (x, [x], {x})", ["1"]),
+    "slice with step": ("def f(x):\n    return x[::-1]", ["'abc'"]),
+    "tuple, list and set": ("def f(x):\n    return (x, [x], {x})", ["1"]),
     "dict": ("def f(x):\n    return {'a': x, 'b': [x]}", ["1"]),
-    "f-string con conversión y formato": ("def f(x):\n    return f'{x!r:>6}|{x}|{x!s}|{x!a}'", ["'ñ'"]),
-    "asignación anotada, += y pass": ("def f(x):\n    y: int = x\n    y += 2\n    pass\n    return y", ["1"]),
-    "and, or y not con cortocircuito": ("def f(x, y):\n    return x and y, x or y, not x, y and x", ["0", "3"]),
-    "comparación encadenada": ("def f(x):\n    return 1 < x < 3, 5 < x < 10", ["2"]),
-    "operadores unarios y potencias pequeñas": ("def f(x):\n    return -x, +x, ~x, x ** 3, x << 2", ["5"]),
-    "builtins sin efectos": ("def f(x):\n    return len(x), abs(-3), min(x), sorted(x), round(2.5)", ["[4, 2]"]),
+    "f-string with conversion and format": ("def f(x):\n    return f'{x!r:>6}|{x}|{x!s}|{x!a}'", ["'ñ'"]),
+    "annotated assignment, += and pass": ("def f(x):\n    y: int = x\n    y += 2\n    pass\n    return y", ["1"]),
+    "short-circuit and, or and not": ("def f(x, y):\n    return x and y, x or y, not x, y and x", ["0", "3"]),
+    "chained comparison": ("def f(x):\n    return 1 < x < 3, 5 < x < 10", ["2"]),
+    "unary operators and small powers": ("def f(x):\n    return -x, +x, ~x, x ** 3, x << 2", ["5"]),
+    "side-effect-free builtins": ("def f(x):\n    return len(x), abs(-3), min(x), sorted(x), round(2.5)", ["[4, 2]"]),
     "IndexError": ("def f(x):\n    return x[10]", ["[1]"]),
     "ZeroDivisionError": ("def f(x):\n    return 1 / x", ["0"]),
-    "raise con mensaje": ("def f(x):\n    if x < 0:\n        raise ValueError('negativo')\n    return x", ["-1"]),
-    "raise sin argumentos": ("def f(x):\n    raise KeyError()", ["1"]),
-    "docstring y literal suelto": ('def f(x):\n    """Doc."""\n    "nota"\n    return x', ["7"]),
+    "raise with a message": ("def f(x):\n    if x < 0:\n        raise ValueError('negative')\n    return x", ["-1"]),
+    "raise without arguments": ("def f(x):\n    raise KeyError()", ["1"]),
+    "docstring and bare literal": ('def f(x):\n    """Doc."""\n    "note"\n    return x', ["7"]),
 }
 
 
-@pytest.mark.parametrize("src, samples", EVALUABLES.values(), ids=EVALUABLES.keys())
-def test_el_interprete_da_lo_mismo_que_ejecutar(src, samples):
+@pytest.mark.parametrize("src, samples", EVALUABLE.values(), ids=EVALUABLE.keys())
+def test_interpreter_matches_real_execution(src, samples):
     func = _func(src)
     assert ev.static_outcome(func, _arg_names(func), samples) == _real_outcome(src, samples)
 
 
-NO_EVALUABLES = {
-    "potencia enorme": ("def f(x):\n    return x ** 100", ["2"]),
-    "desplazamiento enorme": ("def f(x):\n    return x << 100", ["2"]),
-    "operador @": ("def f(x):\n    return x @ x", ["2"]),
-    "lista con *": ("def f(x):\n    return [*x]", ["[1]"]),
-    "dict con **": ("def f(x):\n    return {**x}", ["{}"]),
-    "llamada con *": ("def f(x):\n    return len(*x)", ["[[1]]"]),
-    "atributo": ("def f(x):\n    return x.real", ["1"]),
-    "comprensión": ("def f(x):\n    return [i for i in x]", ["[1]"]),
-    "bucle": ("def f(x):\n    for i in x:\n        pass\n    return x", ["[1]"]),
-    "nombre desconocido": ("def f(x):\n    return y", ["1"]),
-    "builtin no permitido": ("def f(x):\n    return print(x)", ["1"]),
-    "valor no literal": ("def f(x):\n    return float('inf')", ["1"]),
-    "raise de una variable": ("def f(x):\n    e = ValueError('x')\n    raise e", ["1"]),
+NOT_EVALUABLE = {
+    "huge power": ("def f(x):\n    return x ** 100", ["2"]),
+    "huge shift": ("def f(x):\n    return x << 100", ["2"]),
+    "@ operator": ("def f(x):\n    return x @ x", ["2"]),
+    "list with *": ("def f(x):\n    return [*x]", ["[1]"]),
+    "dict with **": ("def f(x):\n    return {**x}", ["{}"]),
+    "call with *": ("def f(x):\n    return len(*x)", ["[[1]]"]),
+    "attribute": ("def f(x):\n    return x.real", ["1"]),
+    "comprehension": ("def f(x):\n    return [i for i in x]", ["[1]"]),
+    "loop": ("def f(x):\n    for i in x:\n        pass\n    return x", ["[1]"]),
+    "unknown name": ("def f(x):\n    return y", ["1"]),
+    "disallowed builtin": ("def f(x):\n    return print(x)", ["1"]),
+    "non-literal value": ("def f(x):\n    return float('inf')", ["1"]),
+    "raise of a variable": ("def f(x):\n    e = ValueError('x')\n    raise e", ["1"]),
 }
 
 
-@pytest.mark.parametrize("src, samples", NO_EVALUABLES.values(), ids=NO_EVALUABLES.keys())
-def test_el_interprete_se_rinde_en_lo_que_no_sabe_evaluar(src, samples):
+@pytest.mark.parametrize("src, samples", NOT_EVALUABLE.values(), ids=NOT_EVALUABLE.keys())
+def test_interpreter_gives_up_on_what_it_cannot_evaluate(src, samples):
     func = _func(src)
     assert ev.static_outcome(func, _arg_names(func), samples) is None
 
 
-def test_static_outcome_sin_funcion_o_con_muestras_que_no_encajan():
+def test_static_outcome_without_a_function_or_with_samples_that_do_not_fit():
     func = _func("def f(x, y):\n    return x + y")
     assert ev.static_outcome(None, [], []) is None
     assert ev.static_outcome(func, ["x", "y"], ["1"]) is None
-    assert ev.static_outcome(func, ["x", "y"], ["1", "no es un literal("]) is None
+    assert ev.static_outcome(func, ["x", "y"], ["1", "not a literal("]) is None
 
 
 @pytest.mark.parametrize("src", ["def f(x):\n    raise ValueError(x)", "def f(x):\n    raise ValueError"])
-def test_raise_sin_un_mensaje_literal_lo_deja_sin_mensaje(src):
-    """El tipo se conoce y el mensaje no se afirma: el test generado comprobará solo el tipo."""
+def test_raise_without_a_literal_message_leaves_the_message_unknown(src):
+    """The type is known and the message is not asserted: the generated test will check the type only."""
     assert ev.static_outcome(_func(src), ["x"], ["5"]) == ("raises", "ValueError", None)
 
 
-@pytest.mark.parametrize("valor, esperado", [
+@pytest.mark.parametrize("value, expected", [
     (1, True), ([1, (2, "a")], True), ({"k": {1, 2}}, True), (None, True),
     (float("nan"), False), (float("inf"), False), (object(), False), ([object()], False),
 ])
-def test_is_literal(valor, esperado):
-    assert ev.is_literal(valor) is esperado
+def test_is_literal(value, expected):
+    assert ev.is_literal(value) is expected
 
 
-@pytest.mark.parametrize("src, esperado", [
+@pytest.mark.parametrize("src, expected", [
     ("def f(x) -> None:\n    print(x)", ("is_none", "")),
     ("def f(x) -> int:\n    return g(x)", ("isinstance", "int")),
     ("def f(x):\n    yield x", ("none", "")),
@@ -126,50 +126,50 @@ def test_is_literal(valor, esperado):
     ("def f(x):\n    if x:\n        return g(x)\n    print(x)", ("none", "")),
     ("def f(x):\n    def g():\n        return 1\n    print(g)", ("is_none", "")),
 ])
-def test_fallback_assertion(src, esperado):
-    assert ev.fallback_assertion(_func(src)) == esperado
+def test_fallback_assertion(src, expected):
+    assert ev.fallback_assertion(_func(src)) == expected
 
 
-def test_fallback_assertion_sin_funcion():
+def test_fallback_assertion_without_a_function():
     assert ev.fallback_assertion(None) == ("none", "")
 
 
-@pytest.mark.parametrize("src, esperado", [
+@pytest.mark.parametrize("src, expected", [
     ("def f():\n    return random.choice([1, 2])", True),
     ("def f():\n    return secrets.token_hex()", True),
     ("def f():\n    return time.time()", True),
-    ("def f():\n    return obtener()[0]", False),
+    ("def f():\n    return fetch()[0]", False),
     ("def f(x):\n    return x + 1", False),
 ])
-def test_uses_nondeterminism(src, esperado):
-    assert ev.uses_nondeterminism(_func(src), {"time.time"}) is esperado
+def test_uses_nondeterminism(src, expected):
+    assert ev.uses_nondeterminism(_func(src), {"time.time"}) is expected
 
 
-def test_uses_nondeterminism_sin_funcion():
+def test_uses_nondeterminism_without_a_function():
     assert ev.uses_nondeterminism(None, {"time.time"}) is False
 
 
-# --- Grabación --------------------------------------------------------------------------------
+# --- Recording -------------------------------------------------------------------------------
 
-def test_grabar_sin_llamadas_no_lanza_ningun_proceso(tmp_path):
-    assert ev.record_outcomes(str(tmp_path / "no_existe.py"), {}) == {}
+def test_recording_without_calls_starts_no_process(tmp_path):
+    assert ev.record_outcomes(str(tmp_path / "missing.py"), {}) == {}
 
 
-def test_grabar_un_modulo_que_termina_el_proceso(tmp_path):
-    mod = tmp_path / "sale.py"
+def test_recording_a_module_that_ends_the_process(tmp_path):
+    mod = tmp_path / "exits.py"
     mod.write_text("import os\nos._exit(3)\n\n\ndef f():\n    return 1\n", encoding="utf-8")
-    with pytest.raises(ev.RecordingError, match="No se pudo grabar"):
+    with pytest.raises(ev.RecordingError, match="Could not record"):
         ev.record_outcomes(str(mod), {"f": "f()"})
 
 
-def test_grabar_una_funcion_que_no_termina(tmp_path):
-    mod = tmp_path / "eterno.py"
+def test_recording_a_function_that_never_finishes(tmp_path):
+    mod = tmp_path / "forever.py"
     mod.write_text("def f():\n    while True:\n        pass\n", encoding="utf-8")
-    with pytest.raises(ev.RecordingError, match="superó 1 s"):
+    with pytest.raises(ev.RecordingError, match="took longer than 1 s"):
         ev.record_outcomes(str(mod), {"f": "f()"}, timeout=1)
 
 
-# --- Calidad de suites --------------------------------------------------------------------------
+# --- Suite quality ------------------------------------------------------------------------------
 
 SUITE = '''import unittest
 from unittest import mock
@@ -177,7 +177,7 @@ from unittest import mock
 import pytest
 
 
-def test_tautologia():
+def test_tautology():
     assert True
 
 
@@ -185,51 +185,51 @@ class T(unittest.TestCase):
     def test_assert_true(self):
         self.assertTrue(True)
 
-    def test_raises_generico(self):
+    def test_generic_raises(self):
         with self.assertRaises(Exception):
-            hacer()
+            do_work()
 
-    def test_raises_con_tupla_generica(self):
+    def test_raises_with_generic_tuple(self):
         with self.assertRaises((ValueError, BaseException)):
-            hacer()
+            do_work()
 
-    def test_mock_sin_spec(self):
-        doble = mock.MagicMock()
-        doble.assert_not_called()
+    def test_mock_without_spec(self):
+        double = mock.MagicMock()
+        double.assert_not_called()
 
-    def test_mock_con_spec(self):
-        doble = mock.MagicMock(spec=dict)
-        doble.assert_not_called()
+    def test_mock_with_spec(self):
+        double = mock.MagicMock(spec=dict)
+        double.assert_not_called()
 
-    def test_patch_sin_autospec_de_un_privado(self):
-        with mock.patch("modulo._interno"):
+    def test_patch_of_a_private_member_without_autospec(self):
+        with mock.patch("module._internal"):
             self.assertEqual(1, 1 + 0)
 
-    def test_patch_object_de_un_privado(self):
-        with mock.patch.object(Clase, "_secreto", autospec=True):
-            self.assertIsNotNone(Clase)
+    def test_patch_object_of_a_private_member(self):
+        with mock.patch.object(Klass, "_secret", autospec=True):
+            self.assertIsNotNone(Klass)
 
 
-def test_omitido():
-    pytest.skip("no aplica")
+def test_skipped():
+    pytest.skip("not applicable")
 
 
-def test_falla_a_proposito():
-    pytest.fail("pendiente")
+def test_fails_on_purpose():
+    pytest.fail("pending")
 
 
-def test_raises_de_timeout_sin_match():
+def test_timeout_raises_without_match():
     with pytest.raises((TimeoutError, asyncio.TimeoutError)):
-        esperar()
+        wait()
 
 
-def test_usa_monkeypatch(monkeypatch):
+def test_uses_monkeypatch(monkeypatch):
     monkeypatch.setattr("os.getcwd", lambda: "/")
     assert open("x").read()
 '''
 
 
-def test_calidad_de_suite_detecta_cada_antipatron(tmp_path):
+def test_suite_quality_detects_every_antipattern(tmp_path):
     suite = tmp_path / "test_suite.py"
     suite.write_text(SUITE, encoding="utf-8")
     findings = QATestRunner.audit_test_suite_quality(str(suite))["findings"]
@@ -239,92 +239,92 @@ def test_calidad_de_suite_detecta_cada_antipatron(tmp_path):
     assert any("assertTrue(True)" in m for m in by_rule["WEAK-ASSERT"])
     assert any("assert True" in m for m in by_rule["WEAK-ASSERT"])
     generic = " ".join(by_rule["GENERIC-RAISES"])
-    assert "test_raises_generico" in generic and "test_raises_con_tupla_generica" in generic
-    assert "test_raises_de_timeout_sin_match" not in generic, "las de timeout no necesitan match"
+    assert "test_generic_raises" in generic and "test_raises_with_generic_tuple" in generic
+    assert "test_timeout_raises_without_match" not in generic, "timeout exceptions need no match"
     mocks = " ".join(by_rule["UNSAFE-MOCK"])
-    assert "test_mock_con_spec" not in mocks
-    assert "Mockeo del método privado '_secreto'" in mocks
-    # El test con monkeypatch está aislado: su open() no cuenta como E/S real.
-    assert not any("test_usa_monkeypatch" in m for msgs in by_rule.values() for m in msgs)
+    assert "test_mock_with_spec" not in mocks
+    assert "Private method '_secret' is mocked" in mocks
+    # The test using monkeypatch is isolated, so its open() does not count as real I/O.
+    assert not any("test_uses_monkeypatch" in m for msgs in by_rule.values() for m in msgs)
 
 
-def test_calidad_de_suite_reconoce_los_dobles_importados_como_modulo(tmp_path):
-    """`from unittest import mock` y después mock.MagicMock() o mock.patch() es de lo más habitual."""
+def test_suite_quality_recognises_doubles_imported_through_the_module(tmp_path):
+    """`from unittest import mock` followed by mock.MagicMock() or mock.patch() is very common."""
     suite = tmp_path / "test_suite.py"
     suite.write_text(SUITE, encoding="utf-8")
     mocks = " ".join(m for _, rule, _, m in QATestRunner.audit_test_suite_quality(str(suite))["findings"]
                      if rule == "UNSAFE-MOCK")
-    assert "test_mock_sin_spec" in mocks
-    assert "Mockeo de miembro privado 'modulo._interno'" in mocks and "autospec=True" in mocks
+    assert "test_mock_without_spec" in mocks
+    assert "Private member 'module._internal' is mocked" in mocks and "autospec=True" in mocks
 
 
-def test_calidad_de_suite_ilegible(tmp_path):
-    assert "no existe" in QATestRunner.audit_test_suite_quality(str(tmp_path / "test_x.py"))["error"]
-    rota = tmp_path / "test_rota.py"
-    rota.write_text("def (:\n", encoding="utf-8")
-    assert "Error auditando calidad" in QATestRunner.audit_test_suite_quality(str(rota))["error"]
+def test_suite_quality_of_an_unreadable_suite(tmp_path):
+    assert "does not exist" in QATestRunner.audit_test_suite_quality(str(tmp_path / "test_x.py"))["error"]
+    broken = tmp_path / "test_broken.py"
+    broken.write_text("def (:\n", encoding="utf-8")
+    assert "Test quality audit error" in QATestRunner.audit_test_suite_quality(str(broken))["error"]
 
 
-def test_ejecutar_una_suite_que_no_existe_o_que_es_un_directorio(tmp_path):
-    assert "no existe" in QATestRunner.run_unittest_suite(str(tmp_path / "test_x.py"))["error"]
-    assert "No se pudo abrir" in QATestRunner.run_unittest_suite(str(tmp_path))["error"]
+def test_running_a_missing_suite_or_a_directory(tmp_path):
+    assert "does not exist" in QATestRunner.run_unittest_suite(str(tmp_path / "test_x.py"))["error"]
+    assert "Could not open" in QATestRunner.run_unittest_suite(str(tmp_path))["error"]
 
 
-def test_cobertura_estimada_de_una_suite_ilegible(tmp_path):
-    assert QATestRunner.estimate_function_coverage(str(tmp_path / "test_x.py")) == {"error": "no se pudo leer test file"}
+def test_estimated_coverage_of_an_unreadable_suite(tmp_path):
+    assert QATestRunner.estimate_function_coverage(str(tmp_path / "test_x.py")) == {"error": "could not read the test file"}
 
 
-# --- Valores de muestra ---------------------------------------------------------------------------
+# --- Sample values -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("anotacion, esperado", [
+@pytest.mark.parametrize("annotation, expected", [
     ("'str'", '"sample"'), ("Optional[int]", "1"), ("int | None", "1"), ("None | str", '"sample"'),
-    ("List[int]", "[]"), ("Callable[[], int]", None), ("'Desconocido'", None),
+    ("List[int]", "[]"), ("Callable[[], int]", None), ("'Unknown'", None),
 ])
-def test_muestra_segun_la_anotacion(anotacion, esperado):
-    assert sv.annotation_sample(ast.parse(anotacion, mode="eval").body) == esperado
+def test_sample_from_the_annotation(annotation, expected):
+    assert sv.annotation_sample(ast.parse(annotation, mode="eval").body) == expected
 
 
-@pytest.mark.parametrize("nombre, esperado", [
-    ("user_name", '"sample"'), ("item_count", "1"), ("cliente_id", "1"), ("cosa", "1"),
+@pytest.mark.parametrize("name, expected", [
+    ("user_name", '"sample"'), ("item_count", "1"), ("client_id", "1"), ("thing", "1"),
 ])
-def test_muestra_segun_el_nombre(nombre, esperado):
-    assert sv.sample_for_arg(nombre) == esperado
+def test_sample_from_the_name(name, expected):
+    assert sv.sample_for_arg(name) == expected
 
 
-@pytest.mark.parametrize("nombre, anotacion, nominal, primero", [
-    ("items", "list", "[]", "empty_list"), ("datos", None, "{}", "empty_dict"),
-    ("porcentaje", None, "10", "zero_percent"), ("n", None, "5", "zero"), ("s", "str", '"a"', "empty_str"),
+@pytest.mark.parametrize("name, annotation, nominal, first", [
+    ("items", "list", "[]", "empty_list"), ("data", None, "{}", "empty_dict"),
+    ("percent", None, "10", "zero_percent"), ("n", None, "5", "zero"), ("s", "str", '"a"', "empty_str"),
 ])
-def test_casos_limite_por_tipo_o_nombre(nombre, anotacion, nominal, primero):
-    assert sv.boundary_samples_for_param(nombre, anotacion, nominal)[0][0] == primero
+def test_boundary_cases_by_type_or_name(name, annotation, nominal, first):
+    assert sv.boundary_samples_for_param(name, annotation, nominal)[0][0] == first
 
 
-def test_matriz_de_escenarios_incluye_metodos_y_funciones_sin_argumentos(tmp_path):
+def test_scenario_matrix_includes_methods_and_functions_without_arguments(tmp_path):
     mod = tmp_path / "mod.py"
-    mod.write_text("class C:\n    def m(self, x):\n        return x\n\n\ndef sin_args():\n    return 1\n",
+    mod.write_text("class C:\n    def m(self, x):\n        return x\n\n\ndef no_args():\n    return 1\n",
                    encoding="utf-8")
     matrix = sv.build_scenario_matrix(str(mod))
     targets = {s["target"] for s in matrix}
-    assert {"C.m", "sin_args"} <= targets
-    assert any(s["scenario"] == "unexpected_extra_arg" for s in matrix if s["target"] == "sin_args")
-    rota = tmp_path / "rota.py"
-    rota.write_text("def (:\n", encoding="utf-8")
-    assert sv.build_scenario_matrix(str(rota)) == []
+    assert {"C.m", "no_args"} <= targets
+    assert any(s["scenario"] == "unexpected_extra_arg" for s in matrix if s["target"] == "no_args")
+    broken = tmp_path / "broken.py"
+    broken.write_text("def (:\n", encoding="utf-8")
+    assert sv.build_scenario_matrix(str(broken)) == []
 
 
-# --- Fachada del generador: alias de compatibilidad -----------------------------------------------
+# --- Generator facade: backward-compatible aliases ------------------------------------------------
 
-def test_los_alias_privados_del_generador_siguen_delegando(tmp_path):
-    """Los nombres privados de antes de la modularización se conservan y dan lo mismo."""
+def test_the_generators_private_aliases_still_delegate(tmp_path):
+    """The private names from before the generator was split into modules are kept and behave the same."""
     mod = tmp_path / "mod.py"
-    mod.write_text("def doble(x: int) -> int:\n    return x * 2\n", encoding="utf-8")
+    mod.write_text("def double(x: int) -> int:\n    return x * 2\n", encoding="utf-8")
     arg = ast.parse("def f(user_name): pass").body[0].args
     assert isinstance(QATestGenerator._read_and_parse(str(mod)), ast.Module)
     assert QATestGenerator._boundary_samples_for_param("n", None, "1") == sv.boundary_samples_for_param("n", None, "1")
     assert QATestGenerator._annotation_sample(ast.Name(id="int")) == "1"
     assert QATestGenerator._sample_for_arg_node(arg.args[0]) == '"sample"'
     assert QATestGenerator._samples_from_arginfo(arg, ["user_name"])[1] == ["user_name"]
-    assert QATestGenerator._sample_for_arg("cliente_id") == "1"
+    assert QATestGenerator._sample_for_arg("client_id") == "1"
     assert QATestGenerator._is_float_literal("1.5") and not QATestGenerator._is_float_literal("1")
     assert QATestGenerator._io_targets([]) == []
     assert QATestGenerator._absorb_blocked(None, []) == (None, [])
@@ -332,44 +332,44 @@ def test_los_alias_privados_del_generador_siguen_delegando(tmp_path):
     assert QATestGenerator._io_called_expr(["os.remove"])
     visitor, recorded = QATestGenerator._visit(str(mod), record=False)
     assert recorded == {} and QATestGenerator._recording_calls(visitor)
-    func = _func("def doble(x):\n    return x * 2")
-    assert QATestGenerator._outcome_for("doble", func, ["x"], ["2"], {})[0] == ("value", "4", "")
-    assert QATestGenerator._visit(str(tmp_path / "no_existe.py"), record=False) is None
+    func = _func("def double(x):\n    return x * 2")
+    assert QATestGenerator._outcome_for("double", func, ["x"], ["2"], {})[0] == ("value", "4", "")
+    assert QATestGenerator._visit(str(tmp_path / "missing.py"), record=False) is None
 
 
-# --- Suites generadas: formas del código analizado -------------------------------------------
+# --- Generated suites: common shapes of analysed code ---------------------------------------
 
-# Formas habituales del código analizado.
-FORMAS_BASE = '''class Vacia:
+# Common shapes of analysed code.
+BASE_SHAPES = '''class Empty:
     pass
 
 
-class ConInit:
-    def __init__(self, valor=1):
-        self.valor = valor
+class WithInit:
+    def __init__(self, value=1):
+        self.value = value
 
 
-def no_devuelve(x):
+def returns_nothing(x):
     print(x)
 
 
-def objeto(x):
-    return Vacia()
+def make_object(x):
+    return Empty()
 
 
-async def doble(x):
+async def double(x):
     return x * 2
 '''
 
-# Una función que siempre lanza con un mensaje no literal y otra que solo devuelve valor en una
-# rama: las dos suites tienen que tratarlas bien.
-FORMAS = FORMAS_BASE + '''
+# A function that always raises with a non-literal message, and another that only returns a value
+# in one branch: both suites have to handle them correctly.
+SHAPES = BASE_SHAPES + '''
 
-def siempre_falla(x):
+def always_fails(x):
     raise RuntimeError(x)
 
 
-def a_veces(x):
+def sometimes(x):
     if x > 5:
         return [x]
     print(x)
@@ -383,61 +383,61 @@ def _run_suite(args, cwd):
 
 
 def _pytest_suite(tmp_path, source, record=False):
-    src = tmp_path / "formas.py"
+    src = tmp_path / "shapes.py"
     src.write_text(source, encoding="utf-8")
-    suite = tmp_path / "test_formas_pytest.py"
+    suite = tmp_path / "test_shapes_pytest.py"
     QATestGenerator.generate_pytest_suite(str(src), str(suite), record=record)
     return suite.read_text(encoding="utf-8"), _run_suite(["pytest", "-q", "-p", "no:cacheprovider", suite.name], tmp_path)
 
 
-@pytest.mark.parametrize("record", [False, True], ids=["estatico", "grabado"])
-def test_suite_unittest_generada_para_cada_forma_pasa(tmp_path, record):
-    src = tmp_path / "formas.py"
-    src.write_text(FORMAS, encoding="utf-8")
-    unit = tmp_path / "test_formas_unit.py"
+@pytest.mark.parametrize("record", [False, True], ids=["static", "recorded"])
+def test_generated_unittest_suite_passes_for_every_shape(tmp_path, record):
+    src = tmp_path / "shapes.py"
+    src.write_text(SHAPES, encoding="utf-8")
+    unit = tmp_path / "test_shapes_unit.py"
     QATestGenerator.generate_test_suite(str(src), str(unit), record=record)
     body = unit.read_text(encoding="utf-8")
-    assert "def test_Vacia_instantiation" in body and "import asyncio" in body
+    assert "def test_Empty_instantiation" in body and "import asyncio" in body
     assert "self.assertIsNone(result)" in body
     if record:
-        # Se graba también el mensaje de la excepción y el tipo del objeto devuelto.
+        # The exception message and the type of the returned object are recorded too.
         assert 'with self.assertRaisesRegex(RuntimeError, r"1"):' in body
-        assert 'self.assertEqual(type(result).__name__, "Vacia")' in body
+        assert 'self.assertEqual(type(result).__name__, "Empty")' in body
     else:
         assert "with self.assertRaises(RuntimeError):" in body
-        assert "Valor exacto desconocido" in body
-        # a_veces solo devuelve valor en una rama: no hay nada seguro que afirmar, y se dice.
-        assert "este test solo comprueba que no hay excepción" in body
+        assert "Exact value unknown" in body
+        # sometimes only returns a value in one branch: nothing is safe to assert, and the test says so.
+        assert "this test only checks that no exception is raised" in body
     run = _run_suite(["unittest", "-q", unit.stem], tmp_path)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-@pytest.mark.parametrize("record", [False, True], ids=["estatico", "grabado"])
-def test_suite_pytest_generada_para_cada_forma_pasa(tmp_path, record):
-    body, run = _pytest_suite(tmp_path, FORMAS, record)
+@pytest.mark.parametrize("record", [False, True], ids=["static", "recorded"])
+def test_generated_pytest_suite_passes_for_every_shape(tmp_path, record):
+    body, run = _pytest_suite(tmp_path, SHAPES, record)
     assert "assert result is None" in body
     if record:
-        assert 'assert type(result).__name__ == "Vacia"' in body
+        assert 'assert type(result).__name__ == "Empty"' in body
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_pytest_con_none_respeta_las_excepciones_de_la_funcion(tmp_path):
-    source = ("def procesa(datos):\n    total = len(datos)\n    if total > 100:\n"
-              "        raise RuntimeError('demasiados')\n    return total\n")
+def test_pytest_none_test_respects_the_functions_own_exceptions(tmp_path):
+    source = ("def process(data):\n    total = len(data)\n    if total > 100:\n"
+              "        raise RuntimeError('too many')\n    return total\n")
     body, run = _pytest_suite(tmp_path, source)
     assert "pytest.raises((RuntimeError, TypeError, ValueError, AttributeError, KeyError, ZeroDivisionError, " \
            'AssertionError), match=r".+")' in body
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_pytest_sin_test_de_none_si_el_parametro_no_se_usa_sin_comprobar(tmp_path):
-    """Solo se exige rechazar None si el cuerpo usa el parámetro en algo que falla con None."""
+def test_pytest_suite_has_no_none_test_when_the_parameter_is_not_used_unchecked(tmp_path):
+    """Rejecting None is only required when the body uses the parameter in something that fails on None."""
     sources = [
-        "def siempre_falla(x):\n    raise RuntimeError(x)\n",               # solo se pasa a otra función
-        "def normaliza(nivel):\n    return str(nivel or '').upper()\n",       # nivel or '' admite None
-        "def opcional(x=None):\n    return x\n",                              # None por defecto
-        "def guarda(x):\n    if x is None:\n        return 0\n    return x + 1\n",
-        "def depende(flag, x):\n    if flag:\n        return 0\n    return x + 1\n",  # flag decide antes
+        "def always_fails(x):\n    raise RuntimeError(x)\n",               # only passed to another function
+        "def normalise(level):\n    return str(level or '').upper()\n",     # level or '' accepts None
+        "def optional(x=None):\n    return x\n",                            # defaults to None
+        "def guard(x):\n    if x is None:\n        return 0\n    return x + 1\n",
+        "def depends(flag, x):\n    if flag:\n        return 0\n    return x + 1\n",  # flag decides first
     ]
     for source in sources:
         body, run = _pytest_suite(tmp_path, source)
@@ -445,98 +445,98 @@ def test_suite_pytest_sin_test_de_none_si_el_parametro_no_se_usa_sin_comprobar(t
         assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_pytest_con_none_no_exige_mensaje_si_la_funcion_lanza_sin_el(tmp_path):
-    source = "def busca(tabla, clave):\n    if clave not in tabla:\n        raise KeyError()\n    return tabla[clave]\n"
+def test_pytest_none_test_does_not_require_a_message_when_the_function_raises_without_one(tmp_path):
+    source = "def lookup(table, key):\n    if key not in table:\n        raise KeyError()\n    return table[key]\n"
     body, run = _pytest_suite(tmp_path, source)
     assert 'match=r".*"' in body and 'match=r".+"' not in body
-    # Con un valor límite, KeyError() sin mensaje también es un rechazo válido.
+    # With a boundary value, a message-less KeyError() is also a valid rejection.
     assert "assert str(exc) or isinstance(exc, (KeyError,))" in body
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_pytest_no_exige_valor_si_la_funcion_puede_devolver_none(tmp_path):
-    body, run = _pytest_suite(tmp_path, "def a_veces(x):\n    if x > 5:\n        return [x]\n    print(x)\n")
-    assert "Puede devolver None por algún camino" in body
+def test_pytest_suite_does_not_require_a_value_when_the_function_may_return_none(tmp_path):
+    body, run = _pytest_suite(tmp_path, "def sometimes(x):\n    if x > 5:\n        return [x]\n    print(x)\n")
+    assert "It can return None on some path" in body
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_suite_de_un_modulo_sin_funciones_ni_clases(tmp_path):
-    src = tmp_path / "constantes.py"
-    src.write_text("LIMITE = 10\n", encoding="utf-8")
-    unit = tmp_path / "test_constantes_unit.py"
+def test_suite_for_a_module_without_functions_or_classes(tmp_path):
+    src = tmp_path / "constants.py"
+    src.write_text("LIMIT = 10\n", encoding="utf-8")
+    unit = tmp_path / "test_constants_unit.py"
     QATestGenerator.generate_test_suite(str(src), str(unit))
     assert "def test_module_importable" in unit.read_text(encoding="utf-8")
-    suite = tmp_path / "test_constantes_pytest.py"
+    suite = tmp_path / "test_constants_pytest.py"
     QATestGenerator.generate_pytest_suite(str(src), str(suite))
     run = _run_suite(["pytest", "-q", "-p", "no:cacheprovider", suite.name], tmp_path)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_is_float_literal_con_texto_que_no_es_literal():
-    assert QATestGenerator._is_float_literal("no es literal(") is False
+def test_is_float_literal_with_text_that_is_not_a_literal():
+    assert QATestGenerator._is_float_literal("not a literal(") is False
 
 
-# --- Payloads adversarios ------------------------------------------------------------------------
+# --- Adversarial payloads ------------------------------------------------------------------------
 
-def test_payloads_adversarios_para_bool_objetos_y_tipos_desconocidos():
+def test_adversarial_payloads_for_bool_objects_and_unknown_types():
     from agentes.qa.api_contract_testing import APIContractTester
 
-    schema = {"activo": bool, "owner": {"name": str}, "raw": bytes}
+    schema = {"active": bool, "owner": {"name": str}, "raw": bytes}
     payloads = dict(APIContractTester.generate_adversarial_payloads(schema))
-    assert payloads["boundary_zero_or_empty"] == {"activo": False, "owner": {}, "raw": {}}
-    assert payloads["boundary_negative_unicode"] == {"activo": True, "owner": {"name": None}, "raw": None}
-    assert payloads["extreme_nan_giant"] == {"activo": False, "owner": {"name": "sample"}, "raw": {}}
-    assert payloads["bool_as_int_or_type_trap"] == {"activo": "true", "owner": [], "raw": None}
-    assert payloads["unexpected_extra_key"] == {"activo": True, "owner": {"name": "sample"}, "raw": {},
+    assert payloads["boundary_zero_or_empty"] == {"active": False, "owner": {}, "raw": {}}
+    assert payloads["boundary_negative_unicode"] == {"active": True, "owner": {"name": None}, "raw": None}
+    assert payloads["extreme_nan_giant"] == {"active": False, "owner": {"name": "sample"}, "raw": {}}
+    assert payloads["bool_as_int_or_type_trap"] == {"active": "true", "owner": [], "raw": None}
+    assert payloads["unexpected_extra_key"] == {"active": True, "owner": {"name": "sample"}, "raw": {},
                                                 "__unexpected_extra__": "adversarial"}
 
 
-SUITE_OMISIONES = '''import unittest
+SKIPS_SUITE = '''import unittest
 
 import pytest
 
 
 class T(unittest.TestCase):
-    def test_omitido_en_unittest(self):
-        self.skipTest("no aplica")
+    def test_skipped_in_unittest(self):
+        self.skipTest("not applicable")
 
-    def test_omitido_con_excepcion(self):
-        raise unittest.SkipTest("no aplica")
+    def test_skipped_with_an_exception(self):
+        raise unittest.SkipTest("not applicable")
 
-    def test_omitido_dentro_de_un_with(self):
+    def test_skipped_inside_a_with(self):
         with open("x"):
-            self.skipTest("no aplica")
+            self.skipTest("not applicable")
 
-    def test_omite_solo_a_veces(self):
+    def test_skips_only_sometimes(self):
         try:
-            hacer()
+            do_work()
         except TypeError:
-            self.skipTest("no encaja")
+            self.skipTest("does not fit")
 
 
-def test_omite_solo_a_veces_en_pytest():
+def test_skips_only_sometimes_in_pytest():
     try:
-        hacer()
+        do_work()
     except TypeError:
-        pytest.skip("no encaja")
+        pytest.skip("does not fit")
 
 
-def test_omite_a_veces_pero_comprueba():
+def test_skips_sometimes_but_checks():
     try:
-        res = hacer()
+        res = do_work()
     except TypeError:
-        pytest.skip("no encaja")
+        pytest.skip("does not fit")
     assert res == 1
 '''
 
 
-def test_calidad_de_suite_trata_igual_las_omisiones_de_pytest_y_unittest(tmp_path):
-    """Un test que se omite siempre no necesita aserciones; uno que solo se omite a veces, sí."""
-    suite = tmp_path / "test_omisiones.py"
-    suite.write_text(SUITE_OMISIONES, encoding="utf-8")
+def test_suite_quality_treats_pytest_and_unittest_skips_alike(tmp_path):
+    """A test that always skips needs no assertions; one that only skips sometimes does."""
+    suite = tmp_path / "test_skips.py"
+    suite.write_text(SKIPS_SUITE, encoding="utf-8")
     weak = " ".join(m for _, rule, _, m in QATestRunner.audit_test_suite_quality(str(suite))["findings"]
                     if rule == "WEAK-ASSERT")
-    for siempre in ("test_omitido_en_unittest'", "test_omitido_con_excepcion'", "test_omitido_dentro_de_un_with'"):
-        assert siempre not in weak
-    assert "test_omite_solo_a_veces'" in weak and "test_omite_solo_a_veces_en_pytest'" in weak
-    assert "test_omite_a_veces_pero_comprueba" not in weak
+    for always in ("test_skipped_in_unittest'", "test_skipped_with_an_exception'", "test_skipped_inside_a_with'"):
+        assert always not in weak
+    assert "test_skips_only_sometimes'" in weak and "test_skips_only_sometimes_in_pytest'" in weak
+    assert "test_skips_sometimes_but_checks" not in weak

@@ -1,1 +1,1 @@
-"""Agente sre: logs estructurados, anomalías, health checks, Prometheus y alertas."""
+"""SRE agent: structured logging, log anomalies, health checks, Prometheus and alerting."""

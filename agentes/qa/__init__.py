@@ -1,1 +1,1 @@
-"""Agente qa: generación y ejecución de tests, testabilidad y contratos de API."""
+"""QA agent: test generation and execution, testability analysis and API contracts."""

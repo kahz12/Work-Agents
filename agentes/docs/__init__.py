@@ -1,1 +1,1 @@
-"""Agente docs: OpenAPI, Swagger UI y documentación Markdown."""
+"""Docs agent: OpenAPI, Swagger UI and Markdown documentation."""

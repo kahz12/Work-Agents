@@ -5,43 +5,43 @@ from typing import Any, Dict, List
 
 class QAReporter:
     """
-    Generador de informes de pruebas y QA Adversario en Markdown y HTML.
+    Writes test and adversarial-QA reports in Markdown and HTML.
     """
 
     @staticmethod
     def generate_markdown_report(unit_test_results: Dict[str, Any], api_results: List[Dict[str, Any]], output_filepath: str) -> str:
         """
-        Genera un informe detallado de QA en formato Markdown.
+        Write a QA summary in Markdown: unit test results plus API contract results.
         """
         lines = [
-            "# Informe Ejecutivo de Pruebas y Aseguramiento de Calidad (QA)",
+            "# Test and Quality Assurance (QA) Report",
             "",
-            "## 1. Resumen de Pruebas Unitarias",
-            f"- **Archivo de Pruebas**: `{unit_test_results.get('test_file', 'N/A')}`",
-            f"- **Duración Total**: `{unit_test_results.get('duration_seconds', 0)}s`",
-            f"- **Pruebas Ejecutadas**: `{unit_test_results.get('tests_run', 0)}`",
-            f"- **Pruebas Exitosas (Passed)**: `{unit_test_results.get('passed', 0)}`",
-            f"- **Fallos / Errores**: `{unit_test_results.get('failures', 0) + unit_test_results.get('errors', 0)}`",
-            f"- **Tasa de Éxito**: `{unit_test_results.get('pass_rate_percentage', 0)}%`",
+            "## 1. Unit Test Summary",
+            f"- **Test file**: `{unit_test_results.get('test_file', 'N/A')}`",
+            f"- **Total duration**: `{unit_test_results.get('duration_seconds', 0)}s`",
+            f"- **Tests run**: `{unit_test_results.get('tests_run', 0)}`",
+            f"- **Tests passed**: `{unit_test_results.get('passed', 0)}`",
+            f"- **Failures / errors**: `{unit_test_results.get('failures', 0) + unit_test_results.get('errors', 0)}`",
+            f"- **Pass rate**: `{unit_test_results.get('pass_rate_percentage', 0)}%`",
             "",
-            "## 2. Resumen de Pruebas de Contrato de API",
-            "| Endpoint | SLA (ms) | Resultado |",
+            "## 2. API Contract Test Summary",
+            "| Endpoint | SLA (ms) | Result |",
             "| :--- | :---: | :---: |",
         ]
 
         for res in api_results:
-            status_str = "APROBADO" if res.get("passed") else "FALLO"
+            status_str = "PASSED" if res.get("passed") else "FAILED"
             lines.append(f"| `{res.get('endpoint')}` | `{res.get('elapsed_ms')}ms` | {status_str} |")
 
         lines.extend([
             "",
-            "## 3. Detalles de Aseveraciones de API",
+            "## 3. API Assertion Details",
         ])
 
         for res in api_results:
             lines.append(f"### Endpoint: `{res.get('endpoint')}`")
             for ass_name, ass_status, ass_msg in res.get("assertions", []):
-                icon = "[OK]" if ass_status == "OK" else "[FALLO]"
+                icon = "[OK]" if ass_status == "OK" else "[FAILED]"
                 lines.append(f"- {icon} **{ass_name}**: {ass_msg}")
 
         report_str = "\n".join(lines)
@@ -57,8 +57,8 @@ class QAReporter:
         output_report_filepath: str,
     ) -> str:
         """
-        Construye la suite pytest adversaria junto con un reporte técnico en Markdown
-        que reúne defectos de testabilidad, matriz de escenarios y código de pruebas generado.
+        Generate the adversarial pytest suite plus a Markdown technical report that collects
+        the testability defects, the scenario matrix and the generated test code.
         """
         from .test_generator import QATestGenerator
 
@@ -72,21 +72,21 @@ class QAReporter:
                 suite_code = sf.read()
 
         lines: List[str] = [
-            f"# Auditoría SDET y QA Adversario: `{os.path.basename(source_filepath)}`",
+            f"# SDET and Adversarial QA Audit: `{os.path.basename(source_filepath)}`",
             "",
-            "## 1. Defectos de Testabilidad (Code Smells para QA)",
+            "## 1. Testability Defects (QA Code Smells)",
         ]
 
         if not testability_findings:
-            lines.append("- Sin defectos críticos de testabilidad detectados (código desacoplado y determinista).")
+            lines.append("- No testability defects found (the code is decoupled and deterministic).")
         else:
             for line, code, level, msg in testability_findings:
-                lines.append(f"- **Línea {line} [{code}] [{level}]**: {msg}")
+                lines.append(f"- **Line {line} [{code}] [{level}]**: {msg}")
 
         lines.extend([
             "",
-            "## 2. Matriz de Escenarios de Prueba",
-            "| Objetivo | Categoría | Escenario | Entradas / Fallo Simulado | Contrato Esperado |",
+            "## 2. Test Scenario Matrix",
+            "| Target | Category | Scenario | Inputs / Simulated Failure | Expected Contract |",
             "| :--- | :--- | :--- | :--- | :--- |",
         ])
 
@@ -99,7 +99,7 @@ class QAReporter:
 
         lines.extend([
             "",
-            f"## 3. Suite de Pruebas Lista para Producción (`{os.path.basename(output_test_filepath)}`)",
+            f"## 3. Production-Ready Test Suite (`{os.path.basename(output_test_filepath)}`)",
             "```python",
             suite_code.rstrip(),
             "```",
@@ -114,7 +114,8 @@ class QAReporter:
     @staticmethod
     def generate_html_report(unit_test_results: Dict[str, Any], api_results: List[Dict[str, Any]], output_filepath: str) -> str:
         """
-        Genera un informe HTML interactivo con estilos modernos y escape XSS para QA.
+        Write the QA report as a styled HTML page. Every value is HTML-escaped, since endpoints
+        and results may come from untrusted sources.
         """
         tests_run = html.escape(str(unit_test_results.get("tests_run", 0)))
         passed = html.escape(str(unit_test_results.get("passed", 0)))
@@ -122,10 +123,10 @@ class QAReporter:
         pass_rate = html.escape(str(unit_test_results.get("pass_rate_percentage", 0)))
 
         html_template = f"""<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Reporte de Aseguramiento de Calidad (QA)</title>
+    <title>Quality Assurance (QA) Report</title>
     <style>
         body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }}
         .container {{ max-width: 900px; margin: 0 auto; background: #1e293b; border-radius: 10px; padding: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
@@ -143,20 +144,20 @@ class QAReporter:
 </head>
 <body>
     <div class="container">
-        <h1>Informe de Aseguramiento de Calidad (QA)</h1>
+        <h1>Quality Assurance (QA) Report</h1>
 
-        <h2>1. Métricas de Pruebas Unitarias</h2>
+        <h2>1. Unit Test Metrics</h2>
         <div class="metrics-grid">
-            <div class="metric-card"><div>Ejecutadas</div><div class="metric-value">{tests_run}</div></div>
-            <div class="metric-card"><div>Exitosas</div><div class="metric-value" style="color:#4ade80">{passed}</div></div>
-            <div class="metric-card"><div>Fallos</div><div class="metric-value" style="color:#f87171">{fail_err}</div></div>
-            <div class="metric-card"><div>Tasa de Éxito</div><div class="metric-value">{pass_rate}%</div></div>
+            <div class="metric-card"><div>Run</div><div class="metric-value">{tests_run}</div></div>
+            <div class="metric-card"><div>Passed</div><div class="metric-value" style="color:#4ade80">{passed}</div></div>
+            <div class="metric-card"><div>Failed</div><div class="metric-value" style="color:#f87171">{fail_err}</div></div>
+            <div class="metric-card"><div>Pass rate</div><div class="metric-value">{pass_rate}%</div></div>
         </div>
 
-        <h2>2. Pruebas de Contrato de API</h2>
+        <h2>2. API Contract Tests</h2>
         <table>
             <thead>
-                <tr><th>Endpoint</th><th>Latencia (SLA)</th><th>Resultado</th></tr>
+                <tr><th>Endpoint</th><th>Latency (SLA)</th><th>Result</th></tr>
             </thead>
             <tbody>
 """

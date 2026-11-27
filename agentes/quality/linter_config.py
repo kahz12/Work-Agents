@@ -4,8 +4,8 @@ import os
 
 class LinterConfigGenerator:
     """
-    Generador y gestor de configuraciones defensivas de análisis estático
-    y calidad de código (Flake8, Pylint, Pyproject.toml, ESLint).
+    Writes baseline configuration files for linters and formatters: flake8, pyproject.toml
+    (black, isort, mypy) and ESLint.
     """
 
     FLAKE8_DEFAULT_CONFIG = """[flake8]
@@ -58,7 +58,7 @@ disallow_untyped_defs = true
     @staticmethod
     def generate_flake8_config(target_dir: str) -> str:
         """
-        Crea o actualiza el archivo .flake8 en el directorio especificado.
+        Write .flake8 into target_dir, overwriting any existing file, and return its path.
         """
         filepath = os.path.join(target_dir, ".flake8")
         with open(filepath, "w", encoding="utf-8") as f:
@@ -68,7 +68,9 @@ disallow_untyped_defs = true
     @staticmethod
     def generate_pyproject_toml(target_dir: str) -> str:
         """
-        Crea o actualiza el archivo pyproject.toml con estándares de formato y tipos.
+        Write a pyproject.toml with black, isort and mypy settings into target_dir, overwriting
+        any existing file, and return its path. Callers that must not clobber an existing
+        project file (the CLI) check for it first.
         """
         filepath = os.path.join(target_dir, "pyproject.toml")
         with open(filepath, "w", encoding="utf-8") as f:
@@ -78,7 +80,7 @@ disallow_untyped_defs = true
     @staticmethod
     def generate_eslint_config(target_dir: str) -> str:
         """
-        Crea o actualiza el archivo .eslintrc.json para JavaScript.
+        Write .eslintrc.json into target_dir, overwriting any existing file, and return its path.
         """
         filepath = os.path.join(target_dir, ".eslintrc.json")
         with open(filepath, "w", encoding="utf-8") as f:

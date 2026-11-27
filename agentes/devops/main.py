@@ -15,62 +15,62 @@ def print_header(title: str):
     print("=" * 65)
 
 def main():
-    print_header("Agente DevOps, Pipelines CI/CD y Docker Compose")
-    print("Módulos GitHub Actions, GitLab CI, Docker Compose, Helm Chart y Validador YAML cargados.")
+    print_header("DevOps, CI/CD Pipelines and Docker Compose Agent")
+    print("Loaded modules: GitHub Actions, GitLab CI, Docker Compose, Helm chart and YAML validator.")
 
     current_dir = agent_output_dir(__file__)
 
     # -----------------------------------------------------------------
-    # Workflow de GitHub Actions con lint (Ruff), análisis de seguridad (Bandit)
-    # y tests (pytest), con permisos mínimos para el GITHUB_TOKEN.
+    # GitHub Actions workflow with linting (Ruff), security analysis (Bandit)
+    # and tests, granting the GITHUB_TOKEN the minimum permissions.
     # -----------------------------------------------------------------
-    print_header("Demostración 1: Generación de Workflow CI/CD GitHub Actions")
+    print_header("Demo 1: GitHub Actions CI/CD workflow")
 
     gh_workflow = os.path.join(current_dir, ".github", "workflows", "ci.yml")
     GitHubActionsGenerator.generate_workflow(gh_workflow)
-    print(f"Workflow GitHub Actions DevSecOps generado en: {gh_workflow}")
+    print(f"DevSecOps GitHub Actions workflow written to: {gh_workflow}")
 
     # -----------------------------------------------------------------
-    # Pipeline de GitLab CI con las etapas lint, test y security (Bandit).
+    # GitLab CI pipeline with lint, test and security (Bandit) stages.
     # -----------------------------------------------------------------
-    print_header("Demostración 2: Generación de Pipeline GitLab CI")
+    print_header("Demo 2: GitLab CI pipeline")
 
     gitlab_file = os.path.join(current_dir, ".gitlab-ci.yml")
     GitLabCIGenerator.generate_ci_file(gitlab_file)
-    print(f"Pipeline GitLab CI generado en: {gitlab_file}")
+    print(f"GitLab CI pipeline written to: {gitlab_file}")
 
     # -----------------------------------------------------------------
-    # docker-compose.yml con límites de memoria y CPU, sistema de archivos de
-    # solo lectura y no-new-privileges.
+    # docker-compose.yml with memory and CPU limits, a read-only filesystem
+    # and no-new-privileges.
     # -----------------------------------------------------------------
-    print_header("Demostración 3: Generación de Docker Compose Fortalecido")
+    print_header("Demo 3: Hardened Docker Compose file")
 
     compose_file = os.path.join(current_dir, "docker-compose.yml")
     DockerComposeGenerator.generate_compose_file(compose_file)
-    print(f"Manifiesto Docker Compose multicontenedor generado en: {compose_file}")
+    print(f"Docker Compose manifest written to: {compose_file}")
 
     # -----------------------------------------------------------------
-    # Helm Chart con Chart.yaml, values.yaml y un Deployment cuyo securityContext
-    # exige usuario no root y sistema de archivos de solo lectura.
+    # Helm chart with Chart.yaml, values.yaml and a Deployment whose
+    # securityContext requires a non-root user and a read-only filesystem.
     # -----------------------------------------------------------------
-    print_header("Demostración 4: Generación de Helm Chart para Kubernetes")
+    print_header("Demo 4: Helm chart for Kubernetes")
 
     helm_dir = os.path.join(current_dir, "my-helm-chart")
     HelmGenerator.generate_helm_chart(helm_dir, chart_name="payment-service")
-    print(f"Helm Chart fortalecido creado en: {helm_dir}")
+    print(f"Hardened Helm chart created in: {helm_dir}")
 
     # -----------------------------------------------------------------
-    # Valida con PyYAML la sintaxis del values.yaml recién generado.
+    # Validate the freshly generated values.yaml with PyYAML.
     # -----------------------------------------------------------------
-    print_header("Demostración 5: Validador Estático de Sintaxis YAML")
+    print_header("Demo 5: Static YAML syntax validation")
 
     values_path = os.path.join(helm_dir, "values.yaml")
     valid_yaml, errors = YAMLValidator.validate_yaml_syntax(values_path)
-    print(f"Validando sintaxis de '{os.path.basename(values_path)}'...")
-    print(f"  Estado: {'VÁLIDO' if valid_yaml else 'CON ERRORES'}")
+    print(f"Validating the syntax of '{os.path.basename(values_path)}'...")
+    print(f"  Status: {'VALID' if valid_yaml else 'HAS ERRORS'}")
 
     print("\n" + "=" * 65)
-    print(" Agente DevOps ejecutado exitosamente.")
+    print(" DevOps agent finished successfully.")
     print("=" * 65 + "\n")
 
 if __name__ == "__main__":

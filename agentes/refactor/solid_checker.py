@@ -40,7 +40,7 @@ _CONTROL_FLOW_TYPES = tuple(
 
 
 def _is_broad_exception_type(exc_node: Optional[ast.AST]) -> bool:
-    """Indica si la cláusula except captura Exception o BaseException de forma amplia."""
+    """True when the except clause catches broadly: bare, Exception or BaseException (also inside a tuple)."""
     if exc_node is None:
         return True
     if isinstance(exc_node, ast.Name):
@@ -51,7 +51,7 @@ def _is_broad_exception_type(exc_node: Optional[ast.AST]) -> bool:
 
 
 def _is_mutable_default_expr(expr: ast.AST) -> bool:
-    """Detecta literales o constructores mutables usados como valores por defecto."""
+    """True for mutable literals, comprehensions or list()/dict()/set() calls used as default values."""
     if isinstance(expr, (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp)):
         return True
     return isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in ("list", "dict", "set")
@@ -59,7 +59,8 @@ def _is_mutable_default_expr(expr: ast.AST) -> bool:
 
 def _is_dataclass_decorator(dec: ast.AST) -> Tuple[bool, bool]:
     """
-    Retorna (es_dataclass, tiene_slots_true) evaluando el decorador @dataclass(...).
+    (is_dataclass, has_slots_true) for a decorator: @dataclass, @dataclasses.dataclass or a
+    call to either with keyword arguments.
     """
     if isinstance(dec, ast.Name) and dec.id == "dataclass":
         return True, False
@@ -77,7 +78,7 @@ def _is_dataclass_decorator(dec: ast.AST) -> Tuple[bool, bool]:
 
 
 def _defines_slots(node: ast.ClassDef) -> bool:
-    """True si la clase declara `__slots__` en su cuerpo."""
+    """True when the class body declares `__slots__`."""
     for stmt in node.body:
         if isinstance(stmt, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "__slots__" for t in stmt.targets
@@ -101,7 +102,7 @@ def _stmt_mutates_self(stmt: ast.AST) -> bool:
 
 
 def _mutates_self(node: ast.ClassDef) -> bool:
-    """True si algún método de la clase reasigna o elimina un atributo de `self`."""
+    """True when any method of the class reassigns or deletes an attribute of `self`."""
     for stmt in node.body:
         if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -110,17 +111,17 @@ def _mutates_self(node: ast.ClassDef) -> bool:
     return False
 
 
-# Como ruff (PLR0912) y pylint (too-many-branches): se permiten hasta 12 ramas. Un umbral
-# más bajo marcaría sobre todo funciones con cláusulas de guarda, que es justo el estilo que
-# se quiere fomentar.
+# Same limit as ruff (PLR0912) and pylint (too-many-branches): up to 12 branches. A lower
+# threshold would mostly flag functions built from guard clauses, which is exactly the style
+# this auditor wants to encourage.
 MAX_BRANCHES = 12
 
 
 class SOLIDAuditor(ast.NodeVisitor):
     """
-    Evaluador estático de principios SOLID y arquitectura/fiabilidad Python:
-    SRP, DIP, OCP, Cláusulas de Guarda (Fail Fast), Higiene de Excepciones,
-    Inmutabilidad/Estado y Contratos de Datos (@dataclass con slots).
+    Static checks for SOLID principles plus Python design and reliability heuristics:
+    SRP, DIP, OCP, guard clauses (fail fast), exception hygiene, state safety and data
+    contracts (@dataclass with slots). Findings are (line, principle, level, message).
     """
 
     def __init__(self, filename: str) -> None:
@@ -133,22 +134,22 @@ class SOLIDAuditor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        # El principio de responsabilidad única (SRP) alerta clases monolíticas con más de diez métodos declarados.
+        # Single responsibility (SRP): more than ten methods suggests a class doing too much.
         methods = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
         if len(methods) > 10:
             self.findings.append((
                 node.lineno,
                 "SRP",
-                "MEDIO",
-                f"La clase '{node.name}' contiene {len(methods)} métodos. Considera dividirla en clases más pequeñas especializadas.",
+                "MEDIUM",
+                f"Class '{node.name}' has {len(methods)} methods. Consider splitting it into smaller, focused classes.",
             ))
 
-        # Inspeccionar el constructor para detectar acoplamiento concreto contrario al principio de inversión de dependencias (DIP).
+        # Dependency inversion (DIP): collaborators built inside the constructor cannot be swapped out.
         init_func = next((m for m in methods if m.name == "__init__"), None)
         if init_func:
             self._audit_init_dip(init_func)
 
-        # Verificar que las dataclasses definan slots=True (o __slots__) para evitar __dict__ por instancia.
+        # Dataclasses should use slots=True (or __slots__) to avoid a per-instance __dict__.
         self._check_dataclass_contract(node)
 
         self.generic_visit(node)
@@ -161,21 +162,26 @@ class SOLIDAuditor(ast.NodeVisitor):
             if not is_dc or has_slots:
                 continue
             if _mutates_self(node):
-                advice = "Considera '@dataclass(slots=True)' (Python 3.10+) o '__slots__' para menor huella de memoria."
+                advice = "Consider '@dataclass(slots=True)' (Python 3.10+) or '__slots__' for a smaller memory footprint."
             else:
                 advice = (
-                    "Considera '@dataclass(frozen=True, slots=True)' (Python 3.10+; o '__slots__' en 3.9) "
-                    "para contratos inmutables y menor huella de memoria."
+                    "Consider '@dataclass(frozen=True, slots=True)' (Python 3.10+; or '__slots__' on 3.9) "
+                    "for an immutable contract and a smaller memory footprint."
                 )
             self.findings.append((
                 node.lineno,
                 "DATA-CONTRACT",
-                "BAJO",
-                f"La dataclass '{node.name}' no especifica 'slots=True'. {advice}",
+                "LOW",
+                f"Dataclass '{node.name}' does not set 'slots=True'. {advice}",
             ))
             return
 
     def _is_ignored_di_name(self, name: str) -> bool:
+        """
+        Names whose direct instantiation is fine: anything not CamelCase, builtins, exceptions
+        and standard-library value types (Path, Lock, Decimal...), which are values rather than
+        collaborators worth injecting.
+        """
         if not name or not name[0].isupper():
             return True
         if name in _BUILTIN_NAMES or name in _STDLIB_VALUE_TYPES or name.endswith(_EXCEPTION_SUFFIXES):
@@ -184,6 +190,10 @@ class SOLIDAuditor(ast.NodeVisitor):
         return origin_mod in _STDLIB_VALUE_MODULES
 
     def _audit_init_dip(self, init_func: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
+        """
+        Flag classes instantiated inside __init__. Raise statements and nested definitions are
+        skipped: building the exception you raise is not a hidden dependency.
+        """
         stack: List[ast.AST] = list(reversed(init_func.body))
         while stack:
             curr = stack.pop()
@@ -195,14 +205,14 @@ class SOLIDAuditor(ast.NodeVisitor):
                     self.findings.append((
                         curr.lineno,
                         "DIP",
-                        "BAJO",
-                        f"Instanciación directa de '{name}' dentro de __init__. Considera aplicar Inyección de Dependencias.",
+                        "LOW",
+                        f"'{name}' is instantiated directly inside __init__. Consider injecting it as a dependency.",
                     ))
             stack.extend(reversed(list(ast.iter_child_nodes(curr))))
 
     @staticmethod
     def _count_local_ifs(func_node: ast.AST) -> int:
-        """Cuenta nodos ast.If de la función actual sin entrar en funciones/clases anidadas."""
+        """Count the ast.If nodes of this function, without descending into nested functions or classes."""
         count = 0
         stack = list(ast.iter_child_nodes(func_node))
         while stack:
@@ -216,14 +226,15 @@ class SOLIDAuditor(ast.NodeVisitor):
 
     @classmethod
     def _node_depth(cls, node: ast.AST, depth: int) -> int:
+        """Deepest control-flow nesting reached inside node, starting from depth."""
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             return depth
         if isinstance(node, ast.If):
             branch_depth = depth + 1
             max_depth = max([branch_depth] + [cls._node_depth(stmt, branch_depth) for stmt in node.body])
             if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
-                # En cadenas elif secuenciales la rama else actúa como selector plano al mismo nivel de abstracción;
-                # mantener depth evita penalizar falsamente el anidamiento vertical en _max_nesting_depth.
+                # An elif is parsed as an If nested in the else branch, but it reads as a flat
+                # selector at the same level, so it keeps the current depth instead of adding one.
                 return max(max_depth, cls._node_depth(node.orelse[0], depth))
             return max([max_depth] + [cls._node_depth(stmt, branch_depth) for stmt in node.orelse])
         if isinstance(node, _CONTROL_FLOW_TYPES):
@@ -233,42 +244,42 @@ class SOLIDAuditor(ast.NodeVisitor):
 
     @classmethod
     def _max_nesting_depth(cls, func_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> int:
-        """Calcula la profundidad máxima de control de flujo sin contar cadenas 'elif' como niveles extra."""
+        """Maximum control-flow nesting depth of the function; elif chains do not add levels."""
         return max([0] + [cls._node_depth(stmt, 0) for stmt in func_node.body])
 
     def _check_function(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
-        # Las cadenas extensas de bifurcaciones condicionales indican violación del principio Abierto/Cerrado (OCP)
-        # y sugieren despacho polimórfico o tablas de estrategias extensibles.
+        # Open/closed (OCP): a long chain of conditionals usually wants polymorphic dispatch or a
+        # strategy table, so new cases can be added without editing the function.
         if_count = self._count_local_ifs(node)
         if if_count > MAX_BRANCHES:
             self.findings.append((
                 node.lineno,
                 "OCP",
-                "MEDIO",
-                f"La función/método '{node.name}' posee {if_count} bifurcaciones 'if/elif' "
-                f"(máximo recomendado: {MAX_BRANCHES}). Evalúa usar el patrón Estrategia o Polimorfismo.",
+                "MEDIUM",
+                f"Function '{node.name}' has {if_count} 'if/elif' branches "
+                f"(recommended maximum: {MAX_BRANCHES}). Consider the Strategy pattern or polymorphism.",
             ))
 
-        # Limitar el anidamiento máximo de bloques a tres niveles promueve retornos tempranos y lectura plana.
+        # More than three levels of nesting: guard clauses and early returns would flatten it.
         max_depth = self._max_nesting_depth(node)
         if max_depth > 3:
             self.findings.append((
                 node.lineno,
                 "GUARD",
-                "MEDIO",
-                f"La función '{node.name}' alcanza {max_depth} niveles de anidamiento (> 3). "
-                "Aplica Cláusulas de Guarda (Guard Clauses) y retornos tempranos para aplanar la lógica.",
+                "MEDIUM",
+                f"Function '{node.name}' reaches {max_depth} levels of nesting (> 3). "
+                "Use guard clauses and early returns to flatten the logic.",
             ))
 
-        # En Python las expresiones por defecto se evalúan una única vez al definir la función;
-        # colecciones mutables compartidas entre invocaciones provocan corrupción silenciosa de estado.
+        # Default expressions are evaluated once, when the function is defined, so a mutable
+        # default is shared by every call and silently accumulates state.
         defaults = list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]
         if any(_is_mutable_default_expr(d) for d in defaults):
             self.findings.append((
                 node.lineno,
                 "STATE-SAFETY",
-                "ALTO",
-                f"Argumento por defecto mutable en '{node.name}'. Usa 'None' como valor por defecto e inicializa dentro de la función.",
+                "HIGH",
+                f"Mutable default argument in '{node.name}'. Use None as the default and create the value inside the function.",
             ))
 
         self.generic_visit(node)
@@ -283,22 +294,22 @@ class SOLIDAuditor(ast.NodeVisitor):
         self.findings.append((
             node.lineno,
             "STATE-SAFETY",
-            "MEDIO",
-            f"Uso de estado mutable global ('global {', '.join(node.names)}'). "
-            "Prefiere funciones puras o inyección explícita de estado.",
+            "MEDIUM",
+            f"Use of global mutable state ('global {', '.join(node.names)}'). "
+            "Prefer pure functions or passing the state explicitly.",
         ))
         self.generic_visit(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        # Exigir higiene de excepciones: evitar bloques vacíos, retornos silenciosos y pérdida de __cause__.
+        # Exception hygiene: no empty handlers, no silent `return None`, no lost __cause__.
         is_broad = _is_broad_exception_type(node.type)
         if node.type is None:
             self.findings.append((
                 node.lineno,
                 "EXCEPTION-HYGIENE",
-                "ALTO",
-                "Cláusula 'except:' desnuda captura BaseException/SystemExit/KeyboardInterrupt. "
-                "Captura excepciones específicas y registra o propaga el fallo.",
+                "HIGH",
+                "A bare 'except:' clause catches BaseException, including SystemExit and KeyboardInterrupt. "
+                "Catch specific exceptions and log or propagate the failure.",
             ))
         elif len(node.body) == 1:
             stmt = node.body[0]
@@ -308,8 +319,8 @@ class SOLIDAuditor(ast.NodeVisitor):
                 self.findings.append((
                     node.lineno,
                     "EXCEPTION-HYGIENE",
-                    "ALTO",
-                    "Bloque 'except' silencia la excepción con 'pass'/'...'. Maneja el error explícitamente (Fail Fast).",
+                    "HIGH",
+                    "The 'except' block silences the exception with 'pass'/'...'. Handle the error explicitly (fail fast).",
                 ))
             elif is_broad and isinstance(stmt, ast.Return) and (
                 stmt.value is None or (isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
@@ -317,14 +328,14 @@ class SOLIDAuditor(ast.NodeVisitor):
                 self.findings.append((
                     node.lineno,
                     "EXCEPTION-HYGIENE",
-                    "ALTO",
-                    "Captura amplia retorna None silenciosamente ocultando el fallo. "
-                    "Propaga una excepción específica o registra el error.",
+                    "HIGH",
+                    "A broad catch silently returns None, hiding the failure. "
+                    "Raise a specific exception or log the error.",
                 ))
 
-        # Verificar raise NuevaExcepcion() sin 'from exc' dentro del bloque except.
-        # No se exige 'from exc' si se relanza la misma variable capturada (raise e)
-        # ni si se lanza una excepción de control de salida (SystemExit, etc.).
+        # A new exception raised inside the handler without `from exc` loses the original
+        # traceback. Re-raising the caught variable itself (raise e) is fine, and so are
+        # exit-control exceptions (SystemExit and friends), which carry no cause worth keeping.
         _exit_exc_names = {"SystemExit", "KeyboardInterrupt", "GeneratorExit", "Exit"}
         stack: List[ast.AST] = list(node.body)
         while stack:
@@ -348,9 +359,9 @@ class SOLIDAuditor(ast.NodeVisitor):
                 self.findings.append((
                     curr.lineno,
                     "EXCEPTION-HYGIENE",
-                    "ALTO",
-                    "Se lanza una nueva excepción dentro de 'except' sin encadenamiento 'from exc'. "
-                    "Usa 'raise ... from exc' para conservar el stack trace original.",
+                    "HIGH",
+                    "A new exception is raised inside 'except' without chaining it with 'from exc'. "
+                    "Use 'raise ... from exc' to keep the original traceback.",
                 ))
             stack.extend(ast.iter_child_nodes(curr))
 
@@ -359,22 +370,23 @@ class SOLIDAuditor(ast.NodeVisitor):
 
 class SOLIDChecker:
     """
-    Analizador de adherencia a principios de diseño limpio, arquitectura SOLID y fiabilidad.
+    Entry point for the SOLID and reliability audit of a single file.
     """
 
     @staticmethod
     def audit_file(filepath: str) -> List[Tuple[int, str, str, str]]:
         """
-        Audita un archivo Python retornando hallazgos (Línea, Principio, Nivel, Recomendación).
+        Audit a Python file. Returns (line, principle, level, recommendation) tuples; a file
+        that cannot be read or parsed yields a single ERROR entry.
         """
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
             tree = ast.parse(content, filename=filepath)
         except FileNotFoundError:
-            return [(0, "N/A", "ERROR", f"Archivo '{filepath}' no encontrado.")]
+            return [(0, "N/A", "ERROR", f"File '{filepath}' not found.")]
         except (IsADirectoryError, PermissionError, OSError, SyntaxError, UnicodeDecodeError, ValueError, TypeError, RecursionError) as e:
-            return [(0, "AST", "ERROR", f"Error en análisis SOLID: {e}")]
+            return [(0, "AST", "ERROR", f"SOLID analysis error: {e}")]
 
         auditor = SOLIDAuditor(filepath)
         auditor.visit(tree)

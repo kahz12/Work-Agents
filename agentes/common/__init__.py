@@ -1,5 +1,5 @@
 """
-Código compartido por los agentes: orquestador, informes, hallazgos, consola y esquemas.
+Code shared by the agents: orchestrator, reports, findings, console output and schemas.
 """
 from .schema import matches_schema_type, validate_typed_schema
 

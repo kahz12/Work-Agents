@@ -8,10 +8,14 @@ _DB_RECEIVER_HINTS = ("cur", "cursor", "db", "conn", "connection", "session", "t
 
 
 class CyclomaticComplexityVisitor(ast.NodeVisitor):
-    """Calculador de Complejidad Ciclomática mediante análisis del árbol AST."""
+    """
+    Cyclomatic complexity of one function: 1 plus one per decision point (if, loop, except
+    handler, and each extra operand of a boolean operator). Nested functions are not counted
+    towards the enclosing one.
+    """
 
     def __init__(self) -> None:
-        # Toda función parte de complejidad base 1 correspondiente a su ruta de ejecución secuencial mínima.
+        # Every function starts at 1: the single path through straight-line code.
         self.complexity: int = 1
         self._inside_function: bool = False
 
@@ -56,7 +60,11 @@ class CyclomaticComplexityVisitor(ast.NodeVisitor):
 
 
 class CognitiveComplexityVisitor(ast.NodeVisitor):
-    """Calculador de Complejidad Cognitiva (evalúa el esfuerzo de comprensión considerando anidamiento)."""
+    """
+    Cognitive complexity of one function: like cyclomatic complexity, but each control-flow
+    structure costs 1 plus its nesting level, so deeply nested code scores higher than the
+    same number of flat branches.
+    """
 
     def __init__(self) -> None:
         self.cognitive_score: int = 0
@@ -103,7 +111,7 @@ class CognitiveComplexityVisitor(ast.NodeVisitor):
 
 
 def _attr_chain(node: ast.AST) -> str:
-    """Construye la cadena de nombres de un nodo ast.Attribute/ast.Name (p. ej. 'urllib.request.urlopen')."""
+    """Dotted name of an ast.Attribute/ast.Name chain (e.g. 'urllib.request.urlopen')."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -113,7 +121,7 @@ def _attr_chain(node: ast.AST) -> str:
 
 
 def _is_zero_int_constant(node: ast.AST) -> bool:
-    """Retorna True únicamente si el nodo es el entero literal 0 (excluyendo bool)."""
+    """True only for the integer literal 0 (False is excluded, even though it equals 0)."""
     return isinstance(node, ast.Constant) and type(node.value) is int and node.value == 0
 
 
@@ -121,9 +129,9 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
 def _bound_names(loop: ast.AST) -> Set[str]:
-    """Nombres que un bucle vuelve a ligar en cada vuelta: su variable y toda asignación del cuerpo.
+    """Names a loop rebinds on every iteration: its target and every assignment in its body.
 
-    Las funciones, lambdas y clases anidadas tienen su propio ámbito y no se recorren.
+    Nested functions, lambdas and classes have their own scope and are not walked.
     """
     bound: Set[str] = set()
     pending = list(ast.iter_child_nodes(loop))
@@ -141,14 +149,16 @@ def _bound_names(loop: ast.AST) -> Set[str]:
     return bound
 
 
+# A membership test against a small literal of constants is cheap enough (and often the
+# clearest code), so only literals of at least this many constants are reported.
 _MIN_CONST_LOOKUP_LEN = 9
 
 
 def _is_loop_invariant(exprs: Iterable[ast.AST], bound: Set[str]) -> bool:
-    """True si las expresiones valen lo mismo en cada vuelta del bucle que liga `bound`.
+    """True when the expressions evaluate to the same value on every iteration of the loop that binds `bound`.
 
-    Una llamada dentro de las expresiones (salvo re.escape) puede devolver algo nuevo cada vez,
-    así que cuenta como variable: mejor dejar pasar algo elevable que avisar de lo que no lo es.
+    A call inside the expressions (other than re.escape) may return something new each time, so
+    it counts as variable: missing a hoistable expression is better than flagging one that is not.
     """
     for expr in exprs:
         for node in ast.walk(expr):
@@ -160,7 +170,7 @@ def _is_loop_invariant(exprs: Iterable[ast.AST], bound: Set[str]) -> bool:
 
 
 def _is_str_expression(node: ast.AST) -> bool:
-    """Heurística segura para detectar literales str, f-strings o conversiones str(...)."""
+    """Conservative check for str literals, f-strings, str(...) and .join()/.format() results."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return True
     if isinstance(node, ast.JoinedStr):
@@ -173,13 +183,13 @@ def _is_str_expression(node: ast.AST) -> bool:
     return False
 
 
-# --- Reglas de llamadas del auditor de rendimiento ---------------------------------
-# Cada regla devuelve sus hallazgos (línea, categoría, nivel, recomendación).
+# --- Call rules of the performance auditor --------------------------------------
+# Each rule returns its findings as (line, category, level, recommendation).
 
 _PerfFinding = Tuple[int, str, str, str]
-_BIG_O = "IMPACTO ALTO - COMPLEJIDAD BIG-O"
-_MEMORY = "IMPACTO MEDIO - HUELLA DE MEMORIA"
-_BLOCKING_IO = "IMPACTO ALTO - I/O BLOQUEANTE"
+_BIG_O = "HIGH IMPACT - BIG-O COMPLEXITY"
+_MEMORY = "MEDIUM IMPACT - MEMORY FOOTPRINT"
+_BLOCKING_IO = "HIGH IMPACT - BLOCKING I/O"
 _URLOPEN_CHAINS = ("urlopen", "urllib.request.urlopen")
 
 
@@ -188,58 +198,58 @@ def _is_requests_call(func: ast.AST) -> bool:
             and func.value.id == "requests" and func.attr in _EXEC_HTTP_METHODS)
 
 
-# Métodos que desplazan toda la lista cuando operan en la posición 0: (argumentos, recomendación).
+# List methods that shift every element when they work on index 0: (argument count, recommendation).
 _FRONT_SHIFTS = {
-    "pop": (1, "Uso de '.pop(0)' dentro de un bucle: cada llamada desplaza toda la lista en O(n). "
-               "Usa collections.deque.popleft() para operaciones FIFO en O(1)."),
-    "insert": (2, "Uso de '.insert(0, ...)' dentro de un bucle: cada llamada desplaza toda la lista en O(n). "
-                  "Usa collections.deque.appendleft() en O(1)."),
+    "pop": (1, "'.pop(0)' inside a loop: each call shifts the whole list, O(n). "
+               "Use collections.deque.popleft() for O(1) FIFO operations."),
+    "insert": (2, "'.insert(0, ...)' inside a loop: each call shifts the whole list, O(n). "
+                  "Use collections.deque.appendleft(), which is O(1)."),
 }
 
 
 def _list_method_findings(node: ast.Call, in_loop: bool) -> List[_PerfFinding]:
-    """pop(0) e insert(0, ...) repetidos en un bucle, y readlines(), que lee el archivo entero."""
+    """pop(0) and insert(0, ...) repeated in a loop, and readlines(), which reads the whole file at once."""
     func = node.func
     if not isinstance(func, ast.Attribute):
         return []
     if func.attr in _FRONT_SHIFTS:
         return _front_shift_findings(node, func, in_loop)
     if func.attr == "readlines" and not node.args and not node.keywords:
-        return [(node.lineno, _MEMORY, "MEDIO",
-                 "Llamada a '.readlines()' carga todas las líneas en RAM de una sola vez. "
-                 "Itera directamente sobre el manejador de archivo ('for linea in f:') o usa generadores.")]
+        return [(node.lineno, _MEMORY, "MEDIUM",
+                 "'.readlines()' loads every line into memory at once. "
+                 "Iterate over the file object directly ('for line in f:') or use a generator.")]
     return []
 
 
 def _front_shift_findings(node: ast.Call, func: ast.Attribute, in_loop: bool) -> List[_PerfFinding]:
     """
-    pop(0) e insert(0, ...) desplazan toda la lista: O(n) por llamada. Solo importa repetido en
-    un bucle (O(n²) en total); una llamada suelta, como anteponer una ruta a sys.path al arrancar
-    o un pop(0) que entrega la siguiente respuesta de un doble de test, no es un cuello de botella.
+    pop(0) and insert(0, ...) shift the whole list: O(n) per call. That only matters when it is
+    repeated in a loop (O(n²) overall); a one-off call, such as prepending a path to sys.path at
+    start-up or a pop(0) that hands out a test double's next response, is not a bottleneck.
     """
     arity, message = _FRONT_SHIFTS[func.attr]
     if len(node.args) != arity or not _is_zero_int_constant(node.args[0]):
         return []
     if not in_loop or _attr_chain(func.value) == "sys.path":
         return []
-    return [(node.lineno, _BIG_O, "ALTO", message)]
+    return [(node.lineno, _BIG_O, "HIGH", message)]
 
 
 def _regex_in_loop_findings(node: ast.Call, chain: str, bound: Set[str]) -> List[_PerfFinding]:
     """
-    re.compile() con el mismo patrón en cada vuelta se puede sacar del bucle. Si el patrón depende
-    de lo que el bucle cambia (for pat in patrones: re.compile(pat)), cada vuelta compila uno
-    distinto y no hay nada que elevar.
+    re.compile() with the same pattern on every iteration can be hoisted out of the loop. When the
+    pattern depends on what the loop rebinds (for pat in patterns: re.compile(pat)), each iteration
+    compiles a different one and there is nothing to hoist.
     """
     if chain != "re.compile" or not _is_loop_invariant([*node.args, *(kw.value for kw in node.keywords)], bound):
         return []
-    return [(node.lineno, _BIG_O, "ALTO",
-             "Compilación repetida de regex 're.compile(...)' dentro de un bucle. "
-             "Aplica loop hoisting moviendo re.compile() fuera del bucle o a nivel de módulo.")]
+    return [(node.lineno, _BIG_O, "HIGH",
+             "'re.compile(...)' is called with the same pattern on every iteration of a loop. "
+             "Hoist it out of the loop or to module level.")]
 
 
 def _blocking_call_name(func: ast.AST, chain: str) -> str:
-    """Nombre de la llamada si es E/S o espera síncrona; cadena vacía si no lo es."""
+    """Display name of the call when it is synchronous I/O or a blocking wait; "" otherwise."""
     if chain == "time.sleep":
         return "time.sleep()"
     if _is_requests_call(func) or chain in _URLOPEN_CHAINS:
@@ -250,13 +260,13 @@ def _blocking_call_name(func: ast.AST, chain: str) -> str:
 
 
 def _blocking_in_async_findings(node: ast.Call, chain: str) -> List[_PerfFinding]:
-    """Cualquier E/S o espera síncrona dentro de una corrutina detiene el planificador de asyncio."""
+    """Synchronous I/O or waiting inside a coroutine stalls the whole asyncio scheduler."""
     name = _blocking_call_name(node.func, chain)
     if not name:
         return []
-    return [(node.lineno, _BLOCKING_IO, "ALTO",
-             f"Llamada síncrona bloqueante '{name}' dentro de 'async def' congela el Event Loop. "
-             "Usa asyncio.sleep, httpx.AsyncClient, aiofiles o asyncio.to_thread().")]
+    return [(node.lineno, _BLOCKING_IO, "HIGH",
+             f"Blocking synchronous call '{name}' inside 'async def' freezes the event loop. "
+             "Use asyncio.sleep, httpx.AsyncClient, aiofiles or asyncio.to_thread().")]
 
 
 def _is_db_execute(func: ast.AST) -> bool:
@@ -266,36 +276,37 @@ def _is_db_execute(func: ast.AST) -> bool:
 
 def _n_plus_one_findings(node: ast.Call, chain: str) -> List[_PerfFinding]:
     """
-    Peticiones HTTP sin reutilizar sesión y consultas SQL por iteración multiplican la latencia
-    (patrón N+1, un handshake TCP/TLS o una ida y vuelta a la base de datos por vuelta).
+    HTTP requests without a reused session, and SQL queries issued per iteration, multiply latency:
+    the N+1 pattern, with one TCP/TLS handshake or one database round trip per iteration.
     """
     if _is_requests_call(node.func) or chain in _URLOPEN_CHAINS:
-        return [(node.lineno, _BLOCKING_IO, "ALTO",
-                 f"Petición HTTP '{chain}()' dentro de un bucle (patrón N+1 sin Connection Pooling). "
-                 "Reutiliza un objeto requests.Session() / httpx.Client o agrupa la operación.")]
+        return [(node.lineno, _BLOCKING_IO, "HIGH",
+                 f"HTTP request '{chain}()' inside a loop (N+1 pattern without connection pooling). "
+                 "Reuse a requests.Session() / httpx.Client or batch the operation.")]
     if chain == "sqlite3.connect" or _is_db_execute(node.func):
-        return [(node.lineno, _BLOCKING_IO, "ALTO",
-                 f"Operación de base de datos '{chain or 'execute'}()' dentro de un bucle (problema N+1). "
-                 "Reutiliza la conexión y agrupa consultas mediante batching o executemany().")]
+        return [(node.lineno, _BLOCKING_IO, "HIGH",
+                 f"Database operation '{chain or 'execute'}()' inside a loop (N+1 problem). "
+                 "Reuse the connection and batch the queries, for example with executemany().")]
     return []
 
 
 class PerformanceAuditor(ast.NodeVisitor):
     """
-    Auditor estático de rendimiento Big-O, huella de memoria e higiene de Event Loop / I/O.
-    Cada hallazgo es una tupla: (línea, categoría, nivel, recomendación).
+    Static performance audit: Big-O pitfalls, memory footprint, and blocking I/O in loops and
+    in the event loop. Each finding is a (line, category, level, recommendation) tuple.
     """
 
     def __init__(self, filename: str) -> None:
         self.filename: str = filename
         self.findings: List[Tuple[int, str, str, str]] = []
         self._loop_depth: int = 0
-        # Nombres que liga cada bucle envolvente en cada vuelta, el más interno al final (ver _bound_names).
+        # Names each enclosing loop rebinds per iteration, innermost last (see _bound_names).
         self._loop_bound: List[Set[str]] = []
         self._in_async_func: bool = False
         self._str_vars: Set[str] = set()
 
     def _visit_scoped(self, node: ast.AST, *, is_async: bool) -> None:
+        """Visit a new scope with fresh loop and string-variable state, restoring the outer state after."""
         prev_loop = self._loop_depth
         prev_bound = self._loop_bound
         prev_async = self._in_async_func
@@ -361,10 +372,10 @@ class PerformanceAuditor(ast.NodeVisitor):
         ):
             self.findings.append((
                 node.lineno,
-                "IMPACTO MEDIO - HUELLA DE MEMORIA",
-                "MEDIO",
-                f"Concatenación incremental de string '{node.target.id} += ...' dentro de un bucle es O(n²). "
-                "Acumula en una lista y une al final con ''.join(...) o usa io.StringIO.",
+                _MEMORY,
+                "MEDIUM",
+                f"Incremental string concatenation '{node.target.id} += ...' inside a loop is O(n²). "
+                "Collect the pieces in a list and ''.join(...) them at the end, or use io.StringIO.",
             ))
         self.generic_visit(node)
 
@@ -379,10 +390,10 @@ class PerformanceAuditor(ast.NodeVisitor):
                 if len(comp.elts) >= min_len and _is_loop_invariant(comp.elts, bound):
                     self.findings.append((
                         node.lineno,
-                        "IMPACTO ALTO - COMPLEJIDAD BIG-O",
-                        "ALTO",
-                        "Búsqueda secuencial O(n) sobre list/tuple literal dentro de un bucle. "
-                        "Precalcula un 'set' o 'dict' fuera del bucle para búsquedas O(1).",
+                        _BIG_O,
+                        "HIGH",
+                        "O(n) membership test against a list/tuple literal inside a loop. "
+                        "Build a 'set' or 'dict' once, outside the loop, for O(1) lookups.",
                     ))
                     break
         self.generic_visit(node)
@@ -390,7 +401,8 @@ class PerformanceAuditor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         chain = _attr_chain(node.func)
         in_loop = self._loop_depth > 0
-        # Mismo orden que siempre: métodos de lista, regex, E/S bloqueante en async y N+1.
+        # Findings for one call are emitted in a fixed order: list methods, regex, blocking I/O in
+        # async code, N+1. Callers and tests rely on that order.
         self.findings.extend(_list_method_findings(node, in_loop))
         if in_loop:
             self.findings.extend(_regex_in_loop_findings(node, chain, self._loop_bound[-1]))
@@ -405,7 +417,7 @@ _DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctio
 
 
 def _docstring_line_numbers(tree: ast.AST) -> Set[int]:
-    """Devuelve los números de línea ocupados por docstrings de módulo, clase o función."""
+    """Line numbers covered by module, class or function docstrings (counted as comment lines)."""
     lines: Set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, _DOCSTRING_OWNERS) or not node.body:
@@ -419,13 +431,13 @@ def _docstring_line_numbers(tree: ast.AST) -> Set[int]:
 
 class CodeMetricsCalculator:
     """
-    Calculador de métricas de legibilidad, mantenibilidad, complejidad ciclomática,
-    complejidad cognitiva y auditoría de rendimiento Big-O / memoria / I/O.
+    Per-file maintainability metrics (lines of code, comment ratio, cyclomatic and cognitive
+    complexity) plus the Big-O / memory / I/O performance audit.
     """
 
     @staticmethod
     def _parse_file_ast(filepath: str) -> Tuple[str, ast.Module]:
-        """Lee el archivo una sola vez y devuelve su contenido y su árbol AST."""
+        """Read the file once and return its content and its AST."""
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
         tree = ast.parse(content, filename=filepath)
@@ -434,15 +446,15 @@ class CodeMetricsCalculator:
     @staticmethod
     def audit_performance(filepath: str) -> List[Tuple[int, str, str, str]]:
         """
-        Audita un archivo Python buscando cuellos de botella de Big-O, memoria e I/O bloqueante.
-        Retorna lista de tuplas (línea, categoría, nivel, recomendación).
+        Look for Big-O, memory and blocking-I/O bottlenecks in a Python file.
+        Returns (line, category, level, recommendation) tuples, without duplicates.
         """
         try:
             _, tree = CodeMetricsCalculator._parse_file_ast(filepath)
         except FileNotFoundError:
-            return [(0, "N/A", "ERROR", f"El archivo '{filepath}' no existe.")]
+            return [(0, "N/A", "ERROR", f"File '{filepath}' does not exist.")]
         except (IsADirectoryError, PermissionError, OSError, UnicodeDecodeError, SyntaxError, ValueError, TypeError, RecursionError) as e:
-            return [(0, "AST", "ERROR", f"Error en auditoría de rendimiento: {e}")]
+            return [(0, "AST", "ERROR", f"Performance audit error: {e}")]
 
         auditor = PerformanceAuditor(filepath)
         auditor.visit(tree)
@@ -451,17 +463,17 @@ class CodeMetricsCalculator:
     @staticmethod
     def calculate_file_metrics(filepath: str) -> Dict[str, Any]:
         """
-        Calcula Líneas de Código (LOC), Complejidad Ciclomática, Complejidad Cognitiva
-        y hallazgos de rendimiento en una sola pasada de lectura y AST.
+        Lines of code, cyclomatic and cognitive complexity and performance findings, from a
+        single read and parse of the file. Returns {"error": ...} when it cannot be analysed.
         """
         try:
             content, tree = CodeMetricsCalculator._parse_file_ast(filepath)
         except FileNotFoundError:
-            return {"error": f"El archivo '{filepath}' no existe."}
+            return {"error": f"File '{filepath}' does not exist."}
         except (IsADirectoryError, PermissionError, OSError) as e:
-            return {"error": f"No se pudo leer '{filepath}': {e}"}
+            return {"error": f"Could not read '{filepath}': {e}"}
         except (SyntaxError, UnicodeDecodeError, ValueError, TypeError, RecursionError) as e:
-            return {"error": f"Error parseando AST: {e}"}
+            return {"error": f"Could not parse the AST: {e}"}
 
         doc_lines = _docstring_line_numbers(tree)
         total_loc = 0

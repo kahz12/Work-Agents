@@ -1,5 +1,8 @@
 """
-Fachada pública del generador de pruebas unitarias, auditoría de testabilidad y escenarios QA.
+Public facade of the QA agent: unit test generation, testability audit and scenario matrices.
+
+The private static methods below delegate to the modules the generator was split into. They
+stay on the class because existing callers and tests reach them through QATestGenerator.
 """
 from __future__ import annotations
 
@@ -56,8 +59,8 @@ __all__ = [
 
 class QATestGenerator:
     """
-    Agente de generación de pruebas unitarias (unittest y pytest adversario),
-    auditoría de testabilidad y matrices de escenarios QA.
+    Generates unit test suites (unittest, and adversarial pytest), audits testability and builds
+    QA scenario matrices.
     """
 
     SAMPLE_BY_NAME: Dict[str, str] = SAMPLE_BY_NAME
@@ -74,8 +77,8 @@ class QATestGenerator:
     @staticmethod
     def audit_testability(source_filepath: str) -> List[Tuple[int, str, str, str]]:
         """
-        Audita el código fuente mediante AST en busca de impedimentos de testabilidad
-        (acoplamiento concreto, estado global mutable, I/O directo y no-determinismo).
+        Look for testability blockers in the source through its AST: concrete coupling, mutable
+        global state, direct I/O and non-determinism.
         """
         return audit_testability(source_filepath)
 
@@ -86,8 +89,8 @@ class QATestGenerator:
     @staticmethod
     def build_scenario_matrix(source_filepath: str) -> List[Dict[str, str]]:
         """
-        Construye la matriz estructurada de escenarios de prueba garantizando al menos
-        tres casos frontera, hostiles o de concurrencia por cada ruta nominal.
+        Build the structured matrix of test scenarios, with at least three boundary, hostile or
+        concurrency cases for every nominal path.
         """
         return build_scenario_matrix(source_filepath)
 
@@ -155,19 +158,19 @@ class QATestGenerator:
     @staticmethod
     def generate_test_suite(source_filepath: str, output_test_filepath: str, *, record: bool = False) -> str:
         """
-        Genera una suite unittest para las funciones y clases del código fuente.
+        Generate a unittest suite for the functions and classes in the source file.
 
-        Con record=True importa y ejecuta el módulo para grabar los resultados reales
-        (ver expected_values.record_outcomes). Devuelve "" si la fuente no se puede leer.
+        With record=True the module is imported and executed to record real results (see
+        expected_values.record_outcomes). Returns "" when the source cannot be read.
         """
         return write_suite(source_filepath, output_test_filepath, framework="unittest", record=record)
 
     @staticmethod
     def generate_pytest_suite(source_filepath: str, output_test_filepath: str, *, record: bool = False) -> str:
         """
-        Genera una suite pytest con parametrización e IDs descriptivos, fixtures con teardown
-        vía yield, dobles con autospec=True, pruebas asíncronas y propiedades con Hypothesis.
+        Generate a pytest suite with parametrisation and descriptive IDs, fixtures with yield
+        teardown, autospec=True doubles, async tests and Hypothesis properties.
 
-        Con record=True importa y ejecuta el módulo para grabar los resultados reales.
+        With record=True the module is imported and executed to record real results.
         """
         return write_suite(source_filepath, output_test_filepath, framework="pytest", record=record)

@@ -1,8 +1,8 @@
 """
-Resolución de nombres importados en un módulo analizado.
+Resolution of imported names in an analysed module.
 
-Sirve para saber a qué apunta de verdad una llamada: `sh.rmtree` con `import shutil as sh`
-es `shutil.rmtree`, y `ydl.urlopen` sobre un objeto de yt-dlp no es `urllib.request.urlopen`.
+It tells what a call really targets: with `import shutil as sh`, `sh.rmtree` is
+`shutil.rmtree`, while `ydl.urlopen` on a yt-dlp object is not `urllib.request.urlopen`.
 """
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ from typing import Dict, Set
 
 @dataclass
 class ImportMap:
-    """Cómo se llaman en el módulo los nombres importados."""
+    """The local names under which a module refers to what it imports."""
 
     module: str
-    modules: Dict[str, str] = field(default_factory=dict)   # alias -> módulo   (import shutil as sh)
-    names: Dict[str, str] = field(default_factory=dict)     # nombre -> origen  (from shutil import rmtree)
-    star: Set[str] = field(default_factory=set)             # módulos con `from x import *`
+    modules: Dict[str, str] = field(default_factory=dict)   # alias -> module  (import shutil as sh)
+    names: Dict[str, str] = field(default_factory=dict)     # name -> origin   (from shutil import rmtree)
+    star: Set[str] = field(default_factory=set)             # modules pulled in with `from x import *`
 
     @classmethod
     def from_tree(cls, tree: ast.AST, module: str = "") -> "ImportMap":
@@ -37,7 +37,7 @@ class ImportMap:
         return imports
 
     def resolve(self, chain: str) -> str:
-        """Nombre completo de una cadena como `ur.urlopen`; la deja igual si no viene de un import."""
+        """Fully qualified name of a chain such as `ur.urlopen`; unchanged when it does not come from an import."""
         head, dot, rest = chain.partition(".")
         if head in self.names:
             base = self.names[head]
@@ -49,7 +49,7 @@ class ImportMap:
 
 
 def attr_chain(node: ast.AST) -> str:
-    """`a.b.c` para Name/Attribute; "" si la base no es un nombre (una llamada, un subíndice...)."""
+    """`a.b.c` for a Name/Attribute chain; "" when the base is not a name (a call, a subscript...)."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):

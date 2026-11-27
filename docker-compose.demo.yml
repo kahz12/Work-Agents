@@ -1,4 +1,4 @@
-# Demo del ecosistema AGENTES (SRE /metrics + /healthz)
+# AGENTES demo stack (SRE /metrics + /healthz)
 services:
   agentes-sre:
     build:

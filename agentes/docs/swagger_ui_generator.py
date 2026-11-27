@@ -4,14 +4,15 @@ import os
 
 class SwaggerUIGenerator:
     """
-    Generador de visor HTML interactivo embebido Swagger UI para especificaciones OpenAPI 3.0.
+    Generates a self-contained HTML page that renders an OpenAPI 3.0 specification with
+    Swagger UI. The spec is embedded in the page; Swagger UI itself loads from cdnjs.
     """
 
     SWAGGER_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Swagger UI - Documentación Interactiva de API</title>
+    <title>Swagger UI - Interactive API Documentation</title>
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.18.3/swagger-ui.css">
     <style>
         html {{ box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }}
@@ -48,7 +49,7 @@ class SwaggerUIGenerator:
     @staticmethod
     def generate_swagger_ui_html(spec_dict: dict, output_filepath: str) -> str:
         """
-        Genera un archivo HTML con Swagger UI embebido autónomo.
+        Write the Swagger UI page for spec_dict and return its path.
         """
         spec_json_str = json.dumps(spec_dict)
         html_content = SwaggerUIGenerator.SWAGGER_HTML_TEMPLATE.format(spec_json=spec_json_str)

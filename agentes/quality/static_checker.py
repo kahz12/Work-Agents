@@ -11,7 +11,7 @@ from ..common.imports import ImportMap, attr_chain
 
 
 def _is_test_file(filepath: str) -> bool:
-    """Detecta archivos de prueba por su nombre base (no por directorios padre)."""
+    """Recognise test files by their base name only; parent directories do not count."""
     name = os.path.basename(filepath.replace("\\", "/")).lower()
     return name == "conftest.py" or (
         name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
@@ -23,7 +23,7 @@ def _has_keyword(call: ast.Call, name: str) -> bool:
 
 
 def _keyword_is(call: ast.Call, name: str, value: bool) -> bool:
-    """La llamada pasa name=value con un literal (verify=False, shell=True...)."""
+    """True when the call passes `name=value` as a literal (verify=False, shell=True...)."""
     return any(
         kw.arg == name and isinstance(kw.value, ast.Constant) and kw.value.value is value
         for kw in call.keywords
@@ -31,14 +31,14 @@ def _keyword_is(call: ast.Call, name: str, value: bool) -> bool:
 
 
 def _is_built_string(node: ast.AST) -> bool:
-    """Texto construido en el momento: f-string, concatenación con + o formato con %."""
+    """Text built at runtime: an f-string, a `+` concatenation or `%` formatting."""
     return isinstance(node, ast.JoinedStr) or (
         isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod))
     )
 
 
 def _open_mode(call: ast.Call) -> Optional[str]:
-    """Modo de un open(): 'r' si no se indica, None si no es un literal."""
+    """Mode of an open() call: 'r' when omitted, None when it is not a literal."""
     mode = call.args[1] if len(call.args) >= 2 else next((kw.value for kw in call.keywords if kw.arg == "mode"), None)
     if mode is None:
         return "r"
@@ -46,7 +46,7 @@ def _open_mode(call: ast.Call) -> Optional[str]:
 
 
 def _handler_nodes(body: List[ast.stmt]):
-    """Nodos del cuerpo de un except, sin entrar en funciones ni clases definidas dentro."""
+    """Nodes in an except body, without descending into functions or classes defined there."""
     pending: List[ast.AST] = list(body)
     while pending:
         node = pending.pop()
@@ -57,8 +57,8 @@ def _handler_nodes(body: List[ast.stmt]):
 
 def _propagates_or_logs(body: List[ast.stmt]) -> bool:
     """
-    El except vuelve a lanzar (raise, raise X from e) o registra la traza (logger.exception,
-    exc_info=True). Es lo que ruff (BLE001) tampoco considera una captura amplia.
+    True when the handler re-raises (raise, raise X from e) or logs the traceback
+    (logger.exception, exc_info=True). Ruff's BLE001 does not flag those handlers either.
     """
     for node in _handler_nodes(body):
         if isinstance(node, ast.Raise):
@@ -73,7 +73,7 @@ def _propagates_or_logs(body: List[ast.stmt]) -> bool:
 
 
 def _uses_name(body: List[ast.stmt], name: Optional[str]) -> bool:
-    """El cuerpo del except usa la excepción capturada: la informa, la guarda o la examina."""
+    """True when the handler body reads the caught exception: it reports, stores or inspects it."""
     return bool(name) and any(
         isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)
         for node in _handler_nodes(body)
@@ -81,19 +81,19 @@ def _uses_name(body: List[ast.stmt], name: Optional[str]) -> bool:
 
 
 def _sql_construction(node: ast.AST) -> Optional[str]:
-    """Cómo se construyó a mano una sentencia SQL, o None si es un literal o una variable."""
+    """How a SQL statement was assembled by hand, or None for a literal or a plain variable."""
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return "concatenate"
+        return "string concatenation"
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
-        return "formato dinámico (%)"
+        return "dynamic formatting (%)"
     if isinstance(node, ast.JoinedStr):
         return "f-string"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
-        return "formato dinámico (.format)"
+        return "dynamic formatting (.format)"
     return None
 
 
-# --- Constantes de las reglas ---------------------------------------------------------------
+# --- Rule constants -------------------------------------------------------------------------
 
 DANGEROUS_FUNCTIONS = frozenset({"eval", "exec"})
 HTTP_CLIENT_LIBS = frozenset({"requests", "httpx"})
@@ -101,45 +101,46 @@ HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch", "head", "requ
 RANDOM_GENERATORS = frozenset({"choice", "choices", "randint", "random", "randrange", "getrandbits", "sample"})
 SENSITIVE_RANDOM_HINTS = ("nonce", "salt", "otp")
 
-# Formas de importar el urlopen de la biblioteca estándar. Un método `.urlopen` de otro
-# objeto (YoutubeDL de yt-dlp, un opener propio) aplica su propio timeout y no cuenta.
+# Fully qualified names of the standard-library urlopen. A `.urlopen` method on some other
+# object (yt-dlp's YoutubeDL, a custom opener) applies its own timeout, so it is not flagged.
 URLLIB_URLOPEN = frozenset({"urllib.request.urlopen", "urllib2.urlopen", "six.moves.urllib.request.urlopen"})
 _URLOPEN_MODULES = frozenset(name.rsplit(".", 1)[0] for name in URLLIB_URLOPEN)
 
-# Clases base cuyos visit_* son el protocolo del visitante y se documentan en la base.
+# Base classes whose visit_* methods implement the visitor protocol and are documented there.
 _VISITOR_BASES = frozenset({"NodeVisitor", "NodeTransformer"})
 
-# Identificadores vinculados a credenciales frente a sufijos de metadatos que solo nombran
-# columnas o etiquetas de interfaz.
+# Name fragments that suggest a credential, and metadata suffixes that only name a column or a
+# UI label ("password_field" holds the name of a field, not a password).
 SECRET_NAME_HINTS = (
     "password", "passwd", "passphrase", "secret", "api_key", "apikey",
     "token", "credential", "access_key", "client_secret", "private_key",
 )
 FIELD_NAME_SUFFIXES = ("_name", "_names", "_field", "_fields", "_label", "_column", "_header", "_param", "_attr")
-# Valores de relleno de la documentación y las plantillas: no son secretos aunque la clave lo parezca.
+# Placeholder values used in docs and templates, in English and Spanish. They are not secrets
+# even when the key name looks like one.
 _PLACEHOLDERS = ("changeme", "change_me", "your", "tu-", "tu_", "placeholder", "example",
                  "ejemplo", "todo", "tbd", "dummy", "sample", "fake", "redacted", "aqui", "here")
 
-# Mensajes que comparten varias reglas. Otras partes del paquete reconocen los hallazgos por
-# su texto (audits._TOPICS, rules._MESSAGE_RULES, reporting._SAST_SARIF_RULES): cambiar uno
-# obliga a revisar esas tablas.
-BLOCKING_IN_ASYNC = "Llamada síncrona bloqueante dentro de función 'async def' (bloquea el event loop)."
-URLOPEN_WITHOUT_TIMEOUT = "Llamada a 'urlopen()' sin 'timeout' explícito (riesgo de DoS)."
-BROAD_EXCEPT = "Uso de 'except Exception:'. Se recomienda especificar excepciones más concretas."
+# Messages shared by several rules. Other modules recognise findings by their text
+# (audits._TOPICS, rules._MESSAGE_RULES, reporting._SAST_SARIF_RULES), so rewording a message
+# here means updating the regular expressions in those tables as well.
+BLOCKING_IN_ASYNC = "Blocking synchronous call inside an 'async def' function (it blocks the event loop)."
+URLOPEN_WITHOUT_TIMEOUT = "Call to 'urlopen()' without an explicit 'timeout' (DoS risk)."
+BROAD_EXCEPT = "Use of 'except Exception:'. Catch more specific exceptions instead."
 BROAD_EXCEPT_REPORTED = (
-    "Uso de 'except Exception:' que informa del error. Correcto en una frontera (CLI, SDK, hilo); "
-    "en otro sitio, especifica excepciones más concretas."
+    "Use of 'except Exception:' that reports the error. Acceptable at a boundary (CLI, SDK, thread); "
+    "elsewhere, catch more specific exceptions."
 )
 TOCTOU = (
-    "Posible condición de carrera TOCTOU: 'os.path.exists' seguido de 'open()' para escribir. "
-    "Entre la comprobación y la apertura el archivo puede cambiar (por ejemplo, por un enlace "
-    "simbólico); usa open(..., 'x') para crearlo solo si no existe."
+    "Possible TOCTOU race condition: 'os.path.exists' followed by 'open()' for writing. "
+    "The file can change between the check and the open (for example, it can be swapped for a "
+    "symlink); use open(..., 'x') to create it only if it does not exist yet."
 )
 
 Issue = Tuple[int, str, str]
 
 
-# --- Estado del recorrido -------------------------------------------------------------------
+# --- Traversal state ------------------------------------------------------------------------
 
 def _nothing() -> None:
     return None
@@ -147,28 +148,29 @@ def _nothing() -> None:
 
 class AnalysisState:
     """
-    Estado del recorrido de un archivo: lo que las reglas necesitan saber del punto que se está
-    visitando y la lista donde dejan sus hallazgos.
+    Per-file traversal state: what the rules need to know about the node being visited, plus
+    the list where they record their findings.
 
-    CodeQualityChecker lo ajusta con enter() antes de visitar los hijos de cada nodo. Las reglas
-    lo leen y añaden hallazgos con issue(); la única que lo modifica es la que anota en
-    checked_paths las rutas comprobadas con os.path.exists(), que usa después la regla TOCTOU.
+    CodeQualityChecker updates it through enter() before visiting each node's children. Rules
+    read it and report through issue(); the only rule that mutates it is the one that records,
+    in checked_paths, the paths tested with os.path.exists(), which the TOCTOU rule reads later.
     """
 
     def __init__(self, filename: str) -> None:
         self.filename = filename
         self.is_test = _is_test_file(filename)
         self.issues: List[Issue] = []
-        # Vacío hasta que enter() visita el módulo; es un valor del recorrido, no un colaborador.
+        # Empty until enter() visits the module. It is traversal data, not an injected collaborator.
         self.imports = ImportMap("")  # agentes: ignore[SOLID-DIP]
-        # Clases y funciones que contienen el nodo que se visita, de fuera adentro.
+        # Classes and functions enclosing the current node, outermost first.
         self.scopes: List[ast.AST] = []
-        # El nodo está en el cuerpo de una `async def` (no en una función normal definida dentro).
+        # True inside the body of an `async def`, but not inside a plain function nested in it.
         self.in_async = False
-        # id() de los open() que se cierran solos: en un `with`, en un ExitStack o con close()
-        # garantizado por un try. Se anotan al entrar en el ámbito, antes de visitar la llamada.
+        # id() of the open() calls whose file is closed for us: inside a `with`, registered on an
+        # ExitStack, or closed by a try statement. They are collected when the enclosing scope is
+        # entered, so the set is complete before the call itself is visited.
         self.managed_opens: Set[int] = set()
-        # Variables comprobadas con os.path.exists() o isfile() en la función actual.
+        # Variables tested with os.path.exists() or isfile() in the current function.
         self.checked_paths: Set[str] = set()
 
     def issue(self, line: int, level: str, message: str) -> None:
@@ -176,9 +178,9 @@ class AnalysisState:
 
     def enter(self, node: ast.AST) -> Callable[[], object]:
         """
-        Prepara el estado para visitar los hijos de node y devuelve la función que lo deja como
-        estaba al terminar. Solo lo cambian el módulo (sus imports), los `with` (sus open()),
-        las clases y las funciones (que abren un ámbito).
+        Prepare the state for visiting node's children and return the callback that restores
+        it afterwards. Only modules (their imports), `with` blocks (their open() calls), classes
+        and functions (which open a new scope) change the state.
         """
         if isinstance(node, ast.Module):
             self.imports = ImportMap.from_tree(node)
@@ -192,7 +194,7 @@ class AnalysisState:
         return _nothing
 
     def _enter_function(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> Callable[[], object]:
-        """Una función empieza sin rutas comprobadas y fija si su cuerpo es asíncrono."""
+        """A function starts with no checked paths and records whether its body is asynchronous."""
         self.managed_opens |= _managed_opens(node)
         saved = (self.checked_paths, self.in_async)
         self.checked_paths, self.in_async = set(), isinstance(node, ast.AsyncFunctionDef)
@@ -210,7 +212,7 @@ def _is_open_call(node: Optional[ast.AST]) -> bool:
 
 
 def _closed_names(stmts: List[ast.stmt]) -> Set[str]:
-    """Nombres X con una llamada X.close() en esas sentencias."""
+    """Names X for which these statements contain an X.close() call."""
     names = set()
     for stmt in stmts:
         for sub in ast.walk(stmt):
@@ -222,12 +224,12 @@ def _closed_names(stmts: List[ast.stmt]) -> Set[str]:
 
 def _managed_opens(func: ast.AST) -> Set[int]:
     """
-    id() de los open() de la función que no hace falta meter en un `with` porque el archivo se
-    cierra igual:
+    id() of the open() calls in func that do not need a `with` because the file is closed anyway:
 
-    - `f = open(...)` y un try posterior con `f.close()` en el finally;
-    - o con `f.close()` en todos los except y en el else (cerrar antes de renombrar, por ejemplo);
-    - `stack.enter_context(open(...))` dentro de un ExitStack.
+    - `f = open(...)` followed by a try whose finally calls `f.close()`;
+    - or a try whose except handlers and else branch all call `f.close()` (closing before a
+      rename, for instance);
+    - `stack.enter_context(open(...))` inside an ExitStack.
     """
     managed: Set[int] = set()
     assigned: Dict[str, List[ast.Call]] = {}
@@ -252,14 +254,14 @@ def _managed_opens(func: ast.AST) -> Set[int]:
     return managed
 
 
-# --- Reglas de funciones --------------------------------------------------------------------
+# --- Function rules -------------------------------------------------------------------------
 
 def _needs_docstring(state: AnalysisState, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
     """
-    Función que forma parte de la API pública y no documenta nada por sí misma. No lo son:
-    las privadas y los tests; las definidas dentro de otra función; las que sobrescriben un
-    método documentado en otro sitio (@override, visit_* de un ast.NodeVisitor), y el setter
-    o deleter de una propiedad, que se documenta en el getter.
+    True for a public-API function that documents nothing itself. Exempt: private functions
+    and tests; functions nested in another function; overrides of a method documented
+    elsewhere (@override, visit_* on an ast.NodeVisitor); and property setters and deleters,
+    which are documented on the getter.
     """
     if state.is_test or node.name.startswith(("_", "test_")) or ast.get_docstring(node):
         return False
@@ -277,28 +279,28 @@ def _needs_docstring(state: AnalysisState, node: Union[ast.FunctionDef, ast.Asyn
 
 def _rule_missing_docstring(state: AnalysisState, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
     if _needs_docstring(state, node):
-        state.issue(node.lineno, "BAJO", f"La función pública '{node.name}' carece de docstring explicativo.")
+        state.issue(node.lineno, "LOW", f"Public function '{node.name}' has no docstring.")
 
 
 def _rule_too_many_args(state: AnalysisState, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
-    """Cuenta los argumentos posicionales sin self ni cls."""
+    """Count positional parameters, excluding self and cls."""
     count = sum(1 for a in node.args.args if a.arg not in ("self", "cls"))
     if count > 5:
-        state.issue(node.lineno, "MEDIO", f"La función '{node.name}' recibe {count} argumentos (máximo recomendado: 5).")
+        state.issue(node.lineno, "MEDIUM", f"Function '{node.name}' takes {count} arguments (recommended maximum: 5).")
 
 
 def _rule_mutable_default(state: AnalysisState, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
-    """Una lista, dict o set por defecto se crea una sola vez y lo comparten todas las llamadas."""
+    """A list, dict or set default is created once and shared by every call."""
     defaults = [*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)]
     if any(isinstance(d, (ast.List, ast.Dict, ast.Set)) for d in defaults):
-        state.issue(node.lineno, "MEDIO",
-                    f"La función '{node.name}' usa un argumento por defecto mutable (lista/dict/set); usa None.")
+        state.issue(node.lineno, "MEDIUM",
+                    f"Function '{node.name}' uses a mutable default argument (list/dict/set); use None instead.")
 
 
-# --- Reglas de excepciones ------------------------------------------------------------------
+# --- Exception rules ------------------------------------------------------------------------
 
 def _is_silencing_body(body: List[ast.stmt]) -> bool:
-    """El cuerpo es solo `pass` o `...`."""
+    """True when the body is just `pass` or `...`."""
     if len(body) != 1:
         return False
     stmt = body[0]
@@ -309,34 +311,36 @@ def _is_silencing_body(body: List[ast.stmt]) -> bool:
 
 def _rule_bare_except(state: AnalysisState, node: ast.ExceptHandler) -> None:
     if node.type is None:
-        state.issue(node.lineno, "ALTO", "Uso de 'except:' genérico. Captura todas las excepciones indeseadas.")
+        state.issue(node.lineno, "HIGH",
+                    "Use of a bare 'except:'. It catches every exception, including ones nobody meant to handle.")
 
 
 def _rule_broad_except(state: AnalysisState, node: ast.ExceptHandler) -> None:
     """
-    except Exception según lo que hace con el error: silenciarlo es lo grave; informar de él
-    es habitual en una frontera; relanzarlo o registrar su traza no lo oculta.
+    Grade `except Exception` by what the handler does with the error: silencing it is the
+    serious case; reporting it is normal at a boundary; re-raising it or logging the traceback
+    hides nothing, so it is not flagged.
     """
     if not (isinstance(node.type, ast.Name) and node.type.id == "Exception"):
         return
     if _is_silencing_body(node.body):
-        state.issue(node.lineno, "ALTO", "Uso de 'except Exception: pass' que silencia errores.")
+        state.issue(node.lineno, "HIGH", "Use of 'except Exception: pass', which silences errors.")
     elif _propagates_or_logs(node.body):
         return
     elif _uses_name(node.body, node.name):
-        state.issue(node.lineno, "BAJO", BROAD_EXCEPT_REPORTED)
+        state.issue(node.lineno, "LOW", BROAD_EXCEPT_REPORTED)
     else:
-        state.issue(node.lineno, "MEDIO", BROAD_EXCEPT)
+        state.issue(node.lineno, "MEDIUM", BROAD_EXCEPT)
 
 
-# --- Reglas de llamadas ---------------------------------------------------------------------
+# --- Call rules -----------------------------------------------------------------------------
 
 def _rule_call(state: AnalysisState, node: ast.Call) -> None:
     """
-    Aplica la cadena de reglas que toca según a qué se llama: a un nombre suelto (eval(),
-    open()...) o a un atributo (os.system(), requests.get()...). En cada cadena la primera
-    regla cuya condición se cumple decide, aunque no emita ningún aviso: yaml.load con
-    SafeLoader, por ejemplo, no debe seguir evaluándose como otra cosa.
+    Run the rule chain that matches the callee: a bare name (eval(), open()...) or an attribute
+    (os.system(), requests.get()...). Within a chain, the first rule whose condition matches
+    owns the call even if it reports nothing: yaml.load with SafeLoader, for example, must not
+    fall through to the remaining rules.
     """
     func = node.func
     if isinstance(func, ast.Name):
@@ -351,11 +355,11 @@ def _rule_call(state: AnalysisState, node: ast.Call) -> None:
 
 
 def _is_urllib_urlopen(state: AnalysisState, func: ast.AST) -> bool:
-    """La llamada es el urlopen de urllib, por el nombre con que lo importa el módulo."""
+    """True when the callee is urllib's urlopen, resolved through the module's own imports."""
     if isinstance(func, ast.Name):
         if func.id in state.imports.names:
             return state.imports.names[func.id] in URLLIB_URLOPEN
-        # Sin import explícito solo puede venir de `from urllib.request import *`.
+        # Without an explicit import, the bare name can only come from `from urllib.request import *`.
         return func.id == "urlopen" and bool(state.imports.star & _URLOPEN_MODULES)
     chain = attr_chain(func)
     return bool(chain) and state.imports.resolve(chain) in URLLIB_URLOPEN
@@ -363,65 +367,66 @@ def _is_urllib_urlopen(state: AnalysisState, func: ast.AST) -> bool:
 
 def _check_blocking_in_async(state: AnalysisState, node: ast.Call) -> None:
     if state.in_async:
-        state.issue(node.lineno, "MEDIO", BLOCKING_IN_ASYNC)
+        state.issue(node.lineno, "MEDIUM", BLOCKING_IN_ASYNC)
 
 
 def _check_urlopen(state: AnalysisState, node: ast.Call) -> None:
-    # El tercer argumento posicional de urlopen es el timeout.
+    # urlopen takes the timeout as its third positional argument.
     if not (len(node.args) >= 3 or _has_keyword(node, "timeout")):
-        state.issue(node.lineno, "MEDIO", URLOPEN_WITHOUT_TIMEOUT)
+        state.issue(node.lineno, "MEDIUM", URLOPEN_WITHOUT_TIMEOUT)
     _check_blocking_in_async(state, node)
 
 
 def _writes(node: ast.Call) -> bool:
     """
-    El open() escribe o crea el archivo, o su modo no es un literal. Leer tras comprobar que
-    existe solo arriesga un FileNotFoundError, no una carrera explotable.
+    True when open() writes or creates the file, or when its mode is not a literal. Reading
+    after an existence check only risks a FileNotFoundError, not an exploitable race.
     """
     mode = _open_mode(node)
     return mode is None or any(flag in mode for flag in "wax+")
 
 
-# Reglas de llamadas a un nombre suelto: (estado, llamada, nombre) -> True si la regla decide.
+# Rules for calls to a bare name: (state, call, name) -> True when the rule owns the call.
 
 def _call_dynamic_exec(state: AnalysisState, node: ast.Call, name: str) -> bool:
     if name not in DANGEROUS_FUNCTIONS:
         return False
-    state.issue(node.lineno, "CRITICO", f"Uso de función de riesgo dinámico '{name}()'.")
+    state.issue(node.lineno, "CRITICAL", f"Use of the dynamic code execution function '{name}()'.")
     return True
 
 
 def _call_open(state: AnalysisState, node: ast.Call, name: str) -> bool:
-    """open() fuera de un `with`, con una ruta construida a mano o tras comprobar que existe."""
+    """open() outside a `with`, with a hand-built path, or right after an existence check."""
     if name != "open":
         return False
     if id(node) not in state.managed_opens:
-        state.issue(node.lineno, "MEDIO",
-                    "Llamada a 'open()' fuera de un context manager 'with' (riesgo de fuga de descriptores).")
+        state.issue(node.lineno, "MEDIUM",
+                    "Call to 'open()' outside a 'with' context manager (risk of leaking file descriptors).")
     if not node.args:
         return True
     path = node.args[0]
     if _is_built_string(path):
-        state.issue(node.lineno, "MEDIO",
-                    "Apertura de archivo con ruta construida dinámicamente; valida con Path.resolve() contra Path Traversal.")
+        state.issue(node.lineno, "MEDIUM",
+                    "File opened with a dynamically built path; validate it with Path.resolve() "
+                    "to prevent path traversal.")
     elif isinstance(path, ast.Name) and path.id in state.checked_paths and _writes(node):
-        state.issue(node.lineno, "MEDIO", TOCTOU)
+        state.issue(node.lineno, "MEDIUM", TOCTOU)
     return True
 
 
 def _call_urlopen(state: AnalysisState, node: ast.Call, name: str) -> bool:
-    """urlopen importado de urllib con su nombre o con un alias (from urllib.request import urlopen as uo)."""
+    """urlopen imported from urllib under its own name or an alias (from urllib.request import urlopen as uo)."""
     if not _is_urllib_urlopen(state, node.func):
         return False
     _check_urlopen(state, node)
     return True
 
 
-# Reglas de llamadas a un atributo: (estado, llamada, atributo, nombre del objeto o None) -> True
-# si la regla decide.
+# Rules for calls to an attribute: (state, call, attribute, owner name or None) -> True when the
+# rule owns the call.
 
 def _attr_path_check(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
-    """os.path.exists(x) / isfile(x): x queda anotada para detectar un open(x) posterior (TOCTOU)."""
+    """os.path.exists(x) / isfile(x): remember x so that a later open(x) can be flagged (TOCTOU)."""
     if not (_is_os_path_check(node.func) and node.args and isinstance(node.args[0], ast.Name)):
         return False
     state.checked_paths.add(node.args[0].id)
@@ -431,14 +436,14 @@ def _attr_path_check(state: AnalysisState, node: ast.Call, attr: str, owner: Opt
 def _attr_pickle(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
     if not (attr == "loads" and owner == "pickle"):
         return False
-    state.issue(node.lineno, "CRITICO", "Uso inseguro de 'pickle.loads()' (deserialización de datos no confiables).")
+    state.issue(node.lineno, "CRITICAL", "Unsafe use of 'pickle.loads()' (deserialising untrusted data).")
     return True
 
 
 def _attr_os_command(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
     if not (owner == "os" and attr in ("system", "popen")):
         return False
-    state.issue(node.lineno, "CRITICO", f"Ejecución insegura de comandos con 'os.{attr}()' (riesgo de Command Injection).")
+    state.issue(node.lineno, "CRITICAL", f"Unsafe command execution with 'os.{attr}()' (command injection risk).")
     return True
 
 
@@ -446,7 +451,7 @@ def _attr_yaml_load(state: AnalysisState, node: ast.Call, attr: str, owner: Opti
     if not (owner == "yaml" and attr == "load"):
         return False
     if not _has_safe_yaml_loader(node):
-        state.issue(node.lineno, "ALTO", "Uso inseguro de 'yaml.load()' sin SafeLoader (usa yaml.safe_load).")
+        state.issue(node.lineno, "HIGH", "Unsafe use of 'yaml.load()' without SafeLoader (use yaml.safe_load).")
     return True
 
 
@@ -454,18 +459,18 @@ def _attr_weak_hash(state: AnalysisState, node: ast.Call, attr: str, owner: Opti
     if not (owner == "hashlib" and attr in ("md5", "sha1")):
         return False
     if not _keyword_is(node, "usedforsecurity", False):
-        state.issue(node.lineno, "MEDIO", f"Uso de hash criptográfico débil 'hashlib.{attr}()' (usa SHA-256 o superior).")
+        state.issue(node.lineno, "MEDIUM", f"Weak cryptographic hash 'hashlib.{attr}()' (use SHA-256 or stronger).")
     return True
 
 
 def _attr_http_client(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
-    """requests o httpx: TLS sin verificar, sin timeout o bloqueando una corrutina."""
+    """requests or httpx: unverified TLS, a missing timeout, or a blocking call inside a coroutine."""
     if not (owner in HTTP_CLIENT_LIBS and attr in HTTP_METHODS):
         return False
     if _keyword_is(node, "verify", False):
-        state.issue(node.lineno, "ALTO", "Verificación TLS desactivada ('verify=False') en petición HTTP.")
+        state.issue(node.lineno, "HIGH", "TLS verification disabled ('verify=False') in an HTTP request.")
     if not _has_keyword(node, "timeout"):
-        state.issue(node.lineno, "MEDIO", "Petición HTTP sin 'timeout' explícito (riesgo de DoS).")
+        state.issue(node.lineno, "MEDIUM", "HTTP request without an explicit 'timeout' (DoS risk).")
     _check_blocking_in_async(state, node)
     return True
 
@@ -480,7 +485,7 @@ def _attr_urlopen(state: AnalysisState, node: ast.Call, attr: str, owner: Option
 def _attr_sleep_in_async(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
     if not (owner == "time" and attr == "sleep" and state.in_async):
         return False
-    state.issue(node.lineno, "MEDIO", BLOCKING_IN_ASYNC)
+    state.issue(node.lineno, "MEDIUM", BLOCKING_IN_ASYNC)
     return True
 
 
@@ -488,25 +493,25 @@ def _attr_shell(state: AnalysisState, node: ast.Call, attr: str, owner: Optional
     if not (attr in ("Popen", "run", "call") and owner == "subprocess"):
         return False
     if _keyword_is(node, "shell", True):
-        state.issue(node.lineno, "ALTO", "Ejecución de subproceso con 'shell=True' (riesgo de inyección de comandos).")
+        state.issue(node.lineno, "HIGH", "Subprocess started with 'shell=True' (command injection risk).")
     return True
 
 
 def _attr_sql(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
-    """SQL construido a mano en execute(): concatenación, %, f-string o .format."""
+    """Hand-built SQL passed to execute(): concatenation, %, an f-string or .format."""
     if not (attr in ("execute", "executemany") and node.args):
         return False
     how = _sql_construction(node.args[0])
     if how:
-        state.issue(node.lineno, "ALTO", f"Posible SQL injection: {how} en execute().")
+        state.issue(node.lineno, "HIGH", f"Possible SQL injection: {how} in execute().")
     return True
 
 
 def _attr_jinja(state: AnalysisState, node: ast.Call, attr: str, owner: Optional[str]) -> bool:
-    """Plantillas Jinja sin escape automático garantizado."""
+    """Jinja templates rendered without a guarantee that autoescape is on."""
     if not (attr in ("render", "from_string") and owner and "jinja" in owner.lower()):
         return False
-    state.issue(node.lineno, "MEDIO", "Uso de Jinja render/from_string: revisar autoescape.")
+    state.issue(node.lineno, "MEDIUM", "Jinja render/from_string call: make sure autoescape is enabled.")
     return True
 
 
@@ -530,13 +535,13 @@ def _is_safe_yaml_loader(loader_node: ast.AST) -> bool:
 
 
 def _has_safe_yaml_loader(node: ast.Call) -> bool:
-    """yaml.load con Loader=SafeLoader (o CSafeLoader), por nombre o como segundo argumento."""
+    """yaml.load with Loader=SafeLoader (or CSafeLoader), as a keyword or as the second argument."""
     if any(kw.arg == "Loader" and _is_safe_yaml_loader(kw.value) for kw in node.keywords):
         return True
     return len(node.args) >= 2 and _is_safe_yaml_loader(node.args[1])
 
 
-# --- Reglas de secretos y aserciones --------------------------------------------------------
+# --- Secret and assert rules ----------------------------------------------------------------
 
 def _names_a_secret(name: str) -> bool:
     low = name.lower()
@@ -546,7 +551,7 @@ def _names_a_secret(name: str) -> bool:
 
 
 def _is_real_secret_value(node: Optional[ast.AST]) -> bool:
-    """Constante de texto no vacía y que no sea un relleno evidente."""
+    """A string constant long enough to be a credential that is not an obvious placeholder."""
     if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
         return False
     val = node.value.strip()
@@ -563,7 +568,7 @@ def _is_real_secret_value(node: Optional[ast.AST]) -> bool:
 
 
 def _uses_insecure_random(value: ast.AST) -> bool:
-    """Detecta uso de random.* en expresiones asignadas a secretos/tokens."""
+    """True when the expression calls one of the random.* generators."""
     for sub in ast.walk(value):
         if (
             isinstance(sub, ast.Call)
@@ -577,7 +582,7 @@ def _uses_insecure_random(value: ast.AST) -> bool:
 
 
 def _names_sensitive_random(name: str) -> bool:
-    """Un nombre de secreto, o de material que también debe ser impredecible (nonce, salt, otp)."""
+    """A secret-like name, or one for material that must also be unpredictable (nonce, salt, otp)."""
     if _names_a_secret(name):
         return True
     low = name.lower()
@@ -586,8 +591,8 @@ def _names_sensitive_random(name: str) -> bool:
 
 def _check_secret_target(state: AnalysisState, target: ast.AST, value: Optional[ast.AST], lineno: int) -> None:
     """
-    Una asignación a una variable o atributo con nombre de secreto: un valor literal real es un
-    secreto incrustado (salvo en tests) y un valor de random.* es material predecible.
+    Check an assignment to a secret-looking variable or attribute: a real literal value is an
+    embedded secret (except in tests), and a value produced by random.* is predictable material.
     """
     if value is None:
         return
@@ -595,44 +600,45 @@ def _check_secret_target(state: AnalysisState, target: ast.AST, value: Optional[
     if not name:
         return
     if not state.is_test and _names_a_secret(name) and _is_real_secret_value(value):
-        state.issue(lineno, "ALTO", f"Posible secreto hardcodeado en '{name}'.")
+        state.issue(lineno, "HIGH", f"Possible hardcoded secret in '{name}'.")
     elif _names_sensitive_random(name) and _uses_insecure_random(value):
-        state.issue(lineno, "ALTO", "Uso del módulo 'random' para generar material sensible; usa 'secrets'.")
+        state.issue(lineno, "HIGH", "The 'random' module is used to generate sensitive material; use 'secrets' instead.")
 
 
 def _rule_secret_in_assign(state: AnalysisState, node: ast.Assign) -> None:
-    """Asignaciones directas y encadenadas: PASSWORD = "..." o a = b = "..."."""
+    """Plain and chained assignments: PASSWORD = "..." or a = b = "..."."""
     for target in node.targets:
         _check_secret_target(state, target, node.value, node.lineno)
 
 
 def _rule_secret_in_annassign(state: AnalysisState, node: ast.AnnAssign) -> None:
-    """Asignaciones con anotación de tipo (API_KEY: str = "..."); sin valor no hay nada que revisar."""
+    """Annotated assignments (API_KEY: str = "..."); a bare annotation has no value to check."""
     _check_secret_target(state, node.target, node.value, node.lineno)
 
 
 def _rule_secret_in_dict(state: AnalysisState, node: ast.Dict) -> None:
-    """Claves de un literal dict ({"token": "..."}), que no pasan por ninguna asignación."""
+    """Keys of a dict literal ({"token": "..."}), which never go through an assignment."""
     if state.is_test:
         return
     for key, value in zip(node.keys, node.values):
         if isinstance(key, ast.Constant) and isinstance(key.value, str) \
                 and _names_a_secret(key.value) and _is_real_secret_value(value):
-            state.issue(node.lineno, "ALTO", f"Posible secreto hardcodeado en la clave '{key.value}'.")
+            state.issue(node.lineno, "HIGH", f"Possible hardcoded secret in key '{key.value}'.")
 
 
 def _rule_secret_in_keyword(state: AnalysisState, node: ast.keyword) -> None:
-    """Argumentos con nombre (conectar(password="...")): el secreto va directo a la llamada."""
+    """Keyword arguments (connect(password="...")): the secret goes straight into the call."""
     if not state.is_test and node.arg and _names_a_secret(node.arg) and _is_real_secret_value(node.value):
-        state.issue(getattr(node.value, "lineno", 0), "ALTO", f"Posible secreto hardcodeado en el argumento '{node.arg}'.")
+        state.issue(getattr(node.value, "lineno", 0), "HIGH", f"Possible hardcoded secret in argument '{node.arg}'.")
 
 
 def _rule_assert(state: AnalysisState, node: ast.Assert) -> None:
     if not state.is_test:
-        state.issue(node.lineno, "BAJO", "Uso de assert (se elimina con python -O); no usar para validación en producción.")
+        state.issue(node.lineno, "LOW",
+                    "Use of assert (stripped under python -O); do not rely on it for validation in production code.")
 
 
-# --- Tabla de reglas ------------------------------------------------------------------------
+# --- Rule tables ----------------------------------------------------------------------------
 
 Rule = Callable[[AnalysisState, Any], None]
 NameCallRule = Callable[[AnalysisState, ast.Call, str], bool]
@@ -640,7 +646,7 @@ AttributeCallRule = Callable[[AnalysisState, ast.Call, str, Optional[str]], bool
 
 _FUNCTION_RULES: Tuple[Rule, ...] = (_rule_missing_docstring, _rule_too_many_args, _rule_mutable_default)
 
-# Reglas de cada tipo de nodo. Los hallazgos de un mismo nodo salen en el orden de su tupla.
+# Rules per node type. Findings for one node are reported in the order of its tuple.
 RULES: Dict[type, Tuple[Rule, ...]] = {
     ast.FunctionDef: _FUNCTION_RULES,
     ast.AsyncFunctionDef: _FUNCTION_RULES,
@@ -653,7 +659,7 @@ RULES: Dict[type, Tuple[Rule, ...]] = {
     ast.keyword: (_rule_secret_in_keyword,),
 }
 
-# Cadenas de _rule_call: se prueban en este orden y la primera que devuelve True decide.
+# Chains used by _rule_call: tried in order, and the first rule that returns True owns the call.
 NAME_CALL_RULES: Tuple[NameCallRule, ...] = (_call_dynamic_exec, _call_open, _call_urlopen)
 ATTRIBUTE_CALL_RULES: Tuple[AttributeCallRule, ...] = (
     _attr_path_check, _attr_pickle, _attr_os_command, _attr_yaml_load, _attr_weak_hash,
@@ -663,21 +669,22 @@ ATTRIBUTE_CALL_RULES: Tuple[AttributeCallRule, ...] = (
 
 class CodeQualityChecker(ast.NodeVisitor):
     """
-    Análisis estático por AST: seguridad al estilo de Bandit y calidad del código.
+    AST-based static analysis: Bandit-style security checks plus code-quality checks.
 
-    Recorre el árbol en preorden. En cada nodo aplica las reglas que RULES registra para su
-    tipo, ajusta el estado con AnalysisState.enter() y visita sus hijos. Una regla nueva es una
-    función más en la tabla: el recorrido no cambia. Los hallazgos son (línea, nivel, mensaje).
+    Walks the tree in pre-order. At each node it runs the rules registered in RULES for that
+    node type, updates the state through AnalysisState.enter() and visits the children. Adding
+    a rule means adding a function to the tables; the traversal itself never changes. Findings
+    are (line, level, message) tuples.
     """
 
     def __init__(self, filename: str) -> None:
         self.filename = filename
-        # Cada recorrido tiene su propio estado: no hay nada que inyectar ni que sustituir.
+        # Each traversal owns its state; there is nothing to inject or swap out.
         self.state = AnalysisState(filename)  # agentes: ignore[SOLID-DIP]
 
     @property
     def issues(self) -> List[Issue]:
-        """Hallazgos en el orden en que se encontraron."""
+        """Findings in the order they were found."""
         return self.state.issues
 
     def visit(self, node: ast.AST) -> None:
@@ -690,16 +697,16 @@ class CodeQualityChecker(ast.NodeVisitor):
             restore()
 
 
-# En los tests, assert (B101) y las contraseñas de ejemplo (B105 a B107) son lo normal; el motor
-# AST tampoco los señala en archivos de test.
+# In tests, assert (B101) and sample passwords (B105 to B107) are expected, and the AST engine
+# does not flag them in test files either.
 _BANDIT_SKIPPED_IN_TESTS = frozenset({"B101", "B105", "B106", "B107"})
 
 
 def _run_bandit(command: List[str], chunk: List[str]) -> Optional[Dict[str, Any]]:
     """
-    Informe JSON de Bandit para un grupo de archivos, o None si no se pudo obtener: no
-    terminó en 60 segundos, no se pudo lanzar o su salida está vacía o no es un objeto JSON.
-    Ese grupo queda entonces solo con el motor AST.
+    Bandit's JSON report for a chunk of files, or None when it could not be obtained: Bandit
+    did not finish within 60 seconds, could not be started, or printed nothing or something
+    other than a JSON object. Files in that chunk are then covered by the AST engine alone.
     """
     try:
         proc = subprocess.run(
@@ -717,10 +724,10 @@ def _run_bandit(command: List[str], chunk: List[str]) -> Optional[Dict[str, Any]
 
 def _bandit_issues_by_file(data: Dict[str, Any], chunk: List[str]) -> Dict[str, List[Issue]]:
     """
-    Hallazgos de un informe de Bandit agrupados por archivo, con la ruta tal como la pasó
-    quien llama: Bandit puede devolverla con otra forma, así que se comparan las rutas reales.
-    Todos los archivos del grupo aparecen aunque no tengan hallazgos, para distinguir «sin
-    hallazgos» de «Bandit no lo analizó».
+    Group a Bandit report by file, keyed by each path exactly as the caller passed it. Bandit
+    may spell paths differently, so they are matched by their real path. Every file in the
+    chunk gets an entry, even with no findings, so that "no findings" can be told apart from
+    "Bandit did not analyse this file".
     """
     real_to_orig = {os.path.realpath(fp): fp for fp in chunk}
     grouped: Dict[str, List[Issue]] = {fp: [] for fp in chunk}
@@ -735,34 +742,36 @@ def _bandit_issues_by_file(data: Dict[str, Any], chunk: List[str]) -> Dict[str, 
 
 class StaticCodeAnalyzer:
     """
-    Analizador de calidad de código: Bandit real si está instalado, AST como fallback.
-    Incluye exportador SARIF v2.1.0.
+    Static analysis front end: runs Bandit when it is installed and always runs the AST engine.
+    Also exports findings as SARIF 2.1.0.
     """
 
     _SEVERITY_MAP = {
-        "HIGH": "ALTO",
-        "MEDIUM": "MEDIO",
-        "LOW": "BAJO",
-        "UNDEFINED": "BAJO",
+        "HIGH": "HIGH",
+        "MEDIUM": "MEDIUM",
+        "LOW": "LOW",
+        "UNDEFINED": "LOW",
     }
 
     @staticmethod
     def _bandit_item_to_issue(item: dict) -> Tuple[int, str, str]:
-        sev = StaticCodeAnalyzer._SEVERITY_MAP.get(str(item.get("issue_severity", "LOW")).upper(), "MEDIO")
-        if str(item.get("issue_confidence", "")).upper() == "HIGH" and sev == "ALTO":
-            sev = "CRITICO"
+        sev = StaticCodeAnalyzer._SEVERITY_MAP.get(str(item.get("issue_severity", "LOW")).upper(), "MEDIUM")
+        # Bandit reports severity and confidence separately; HIGH severity with HIGH confidence
+        # is promoted to CRITICAL so it sorts above the merely likely issues.
+        if str(item.get("issue_confidence", "")).upper() == "HIGH" and sev == "HIGH":
+            sev = "CRITICAL"
         line = int(item.get("line_number") or 0)
-        text = item.get("issue_text") or item.get("test_name") or "Hallazgo Bandit"
+        text = item.get("issue_text") or item.get("test_name") or "Bandit finding"
         return (line, sev, f"[bandit] {text}")
 
     @staticmethod
     def bandit_command() -> Optional[List[str]]:
         """
-        Cómo lanzar Bandit, o None si no está instalado.
+        Command line that runs Bandit, or None when it is not installed.
 
-        Primero se busca junto al intérprete que ejecuta agentes (`python -m bandit`): así se
-        encuentra aunque el entorno virtual no esté activado (pipx, ruta absoluta, CI con
-        `python -m agentes`). Después, en el PATH.
+        The interpreter running agentes is tried first (`python -m bandit`), so Bandit is found
+        even when its virtual environment is not activated (pipx, an absolute path, CI running
+        `python -m agentes`). The PATH is searched next.
         """
         if importlib.util.find_spec("bandit") is not None:
             return [sys.executable, "-m", "bandit"]
@@ -775,9 +784,9 @@ class StaticCodeAnalyzer:
         chunk_size: int = 100,
     ) -> Optional[Dict[str, List[Tuple[int, str, str]]]]:
         """
-        Hallazgos de Bandit por archivo, con un subproceso por cada grupo de chunk_size archivos.
-        Un grupo en el que Bandit falla no aparece en el resultado (sus archivos quedan solo con
-        el motor AST). None si Bandit no está instalado o no pudo con ningún grupo.
+        Bandit findings per file, running one subprocess per chunk of chunk_size files. A chunk
+        Bandit fails on is left out of the result, so its files fall back to the AST engine.
+        Returns None when Bandit is not installed or failed on every chunk.
         """
         command = StaticCodeAnalyzer.bandit_command()
         if not command or not filepaths:
@@ -826,9 +835,9 @@ class StaticCodeAnalyzer:
             checker.visit(tree)
             return checker.issues
         except SyntaxError as e:
-            return [(e.lineno or 0, "ALTO", f"Error de sintaxis: {e.msg}")]
+            return [(e.lineno or 0, "HIGH", f"Syntax error: {e.msg}")]
         except Exception as e:
-            return [(0, "ERROR", f"Error durante el análisis: {str(e)}")]
+            return [(0, "ERROR", f"Error during analysis: {str(e)}")]
 
     @staticmethod
     def analyze_python_files(
@@ -837,7 +846,8 @@ class StaticCodeAnalyzer:
         prefer_bandit: bool = True,
     ) -> Dict[str, List[Tuple[int, str, str]]]:
         """
-        Analiza múltiples archivos Python en lote (un subproceso Bandit por chunk + AST).
+        Analyse several Python files in one batch: one Bandit subprocess per chunk plus the AST
+        engine on every file. Maps each path to its merged findings.
         """
         existing = [fp for fp in filepaths if os.path.exists(fp)]
         batch_map = (
@@ -847,7 +857,7 @@ class StaticCodeAnalyzer:
         results: Dict[str, List[Tuple[int, str, str]]] = {}
         for fp in filepaths:
             if not os.path.exists(fp):
-                results[fp] = [(0, "ERROR", f"El archivo {fp} no existe.")]
+                results[fp] = [(0, "ERROR", f"File {fp} does not exist.")]
                 continue
             b_issues = batch_map.get(fp) if batch_map is not None else None
             ast_issues = StaticCodeAnalyzer._analyze_with_ast(fp)
@@ -857,14 +867,14 @@ class StaticCodeAnalyzer:
     @staticmethod
     def analyze_python_file(filepath: str, *, prefer_bandit: bool = True) -> List[Tuple[int, str, str]]:
         """
-        Analiza un archivo Python. Usa Bandit si está disponible; si no, AST local.
+        Analyse a single Python file with Bandit (when available) and the AST engine.
         """
         return StaticCodeAnalyzer.analyze_python_files([filepath], prefer_bandit=prefer_bandit)[filepath]
 
     @staticmethod
     def export_to_sarif(filepath: str, issues: List[Tuple[int, str, str]], output_sarif_path: str) -> str:
         """
-        Exporta los hallazgos en formato JSON SARIF v2.1.0 compatible con GitHub Code Scanning.
+        Write the findings as a SARIF 2.1.0 log that GitHub Code Scanning can ingest.
         """
         from ..common.reporting import findings_to_sarif
 

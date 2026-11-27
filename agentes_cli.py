@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Lanzador para usar el CLI desde un clon sin instalarlo: `python3 agentes_cli.py <comando>`.
+Launcher for running the CLI from a clone without installing it: `python3 agentes_cli.py <command>`.
 
-El código está en agentes/cli/. Una vez instalado el paquete, usa el comando `agentes`
-o `python -m agentes`.
+The CLI itself lives in agentes/cli/. Once the package is installed, use the `agentes`
+command or `python -m agentes` instead.
 """
 import os
 import sys

@@ -1,22 +1,21 @@
-# Agente de Documentación y Swagger UI
+# Documentation and Swagger UI Agent
 
-Generación de OpenAPI 3.0.3, Swagger UI HTML y manuales Markdown a partir de código Python.
+Generates OpenAPI 3.0.3 specifications, a Swagger UI HTML page and Markdown manuals from Python source code.
 
-## Estructura
+## Layout
 
-- `openapi_generator.py` — OpenAPI 3.0.3 por convención `get_`/`post_`/`put_`/`delete_`. Incluye **parameters** (GET/DELETE), **requestBody** + **components.schemas** (POST/PUT) según type hints. Exporta JSON y YAML.
-- `swagger_ui_generator.py` — HTML con Swagger UI (CDN) y spec embebida.
-- `markdown_doc_generator.py` — Manual técnico desde docstrings de módulos/clases/métodos.
-- `fixtures/sample_api.py` — Fixture de demo (fuente de verdad; `main.py` la copia a `sample_api.py`).
-- `main.py` — Demo ejecutable.
+- `openapi_generator.py` — OpenAPI 3.0.3 from Flask and FastAPI route decorators, optionally also from the `get_`/`post_`/`put_`/`delete_` naming convention. Produces **parameters** (GET/DELETE), **requestBody** and **components.schemas** (POST/PUT) from the type hints. Exports JSON and YAML.
+- `swagger_ui_generator.py` — HTML page with Swagger UI (from a CDN) and the spec embedded.
+- `markdown_doc_generator.py` — Technical manual built from module, class and method docstrings.
+- `fixtures/sample_api.py` — Demo fixture and source of truth; `main.py` copies it to `sample_api.py` before analysing it.
+- `main.py` — Runnable demo.
 
-## Uso
+## Usage
 
 ```bash
-agentes demo docs               # demo con datos de ejemplo
-python -m agentes.docs.main     # lo mismo, sin pasar por el CLI
+agentes demo docs               # demo on sample data
+python -m agentes.docs.main     # the same, without going through the CLI
 agentes generate openapi --source app.py -o openapi.yaml
 ```
 
-
-Nota: el HTML de Swagger UI requiere red para cargar el CDN de swagger-ui.
+Note: the Swagger UI page needs network access to load swagger-ui from the CDN.

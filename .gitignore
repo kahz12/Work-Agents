@@ -1,11 +1,11 @@
-# Bytecode y caches
+# Bytecode and tool caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 
-# Entornos y empaquetado
+# Virtual environments and packaging output
 venv/
 venv313/
 .venv/
@@ -13,8 +13,8 @@ build/
 dist/
 *.egg-info/
 
-# Secretos y credenciales locales: nunca se versionan.
-# Las plantillas sin valores reales (.env.example) sí se pueden subir.
+# Local secrets and credentials are never committed.
+# Templates without real values (.env.example) may be committed.
 .env
 .env.*
 !.env.example
@@ -25,27 +25,27 @@ dist/
 id_rsa*
 id_ed25519*
 
-# Cobertura y herramientas de test
+# Coverage and test tooling
 .coverage
 .coverage.*
 htmlcov/
 .tox/
 .nox/
 
-# Editores y sistema operativo
+# Editors and operating system files
 .vscode/
 .idea/
 *.swp
 .DS_Store
 Thumbs.db
 
-# Reportes del pipeline
+# Pipeline reports
 reports/
 AGENTES_WORKDIR/
 
 # ---------------------------------------------------------------
-# Artefactos que generan los demos al ejecutarse (`demo <agente>`).
-# Las entradas reales son solo */fixtures/*.py, que sí se versionan.
+# Artefacts the demos write when they run (`demo <agent>`).
+# The only real inputs are */fixtures/*.py, which are committed.
 # ---------------------------------------------------------------
 agentes/quality/.eslintrc.json
 agentes/quality/.flake8
@@ -66,7 +66,7 @@ agentes/docs/sample_api.py
 agentes/docs/swagger_ui.html
 
 agentes/hardening/Dockerfile.hardened
-agentes/hardening/mi_aplicacion.service
+agentes/hardening/my_app.service
 
 agentes/qa/qa_adversarial_report.md
 agentes/qa/qa_report.html

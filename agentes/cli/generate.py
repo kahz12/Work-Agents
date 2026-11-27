@@ -1,5 +1,5 @@
 """
-Comandos CLI de generación y corrección: generate y fix.
+Generation and repair commands: generate and fix.
 """
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def _gen_linters(args: argparse.Namespace, out: str) -> List[str]:
     for name, build in builders:
         dest = os.path.join(out, name)
         if os.path.exists(dest) and not args.force:
-            ui.warn(f"Se conserva {rel(dest)} porque ya existe. Usa --force para reemplazarlo.")
+            ui.warn(f"Keeping {rel(dest)} because it already exists. Use --force to replace it.")
             continue
         written.append(build(out))
     return written
@@ -123,16 +123,16 @@ def _spec_from_source(args: argparse.Namespace) -> Dict[str, Any]:
     spec = OpenAPIGenerator.generate_openapi_spec(source, title=args.service, naming_convention=args.naming_convention)
     errors = spec.get("x-agentes-errors") or []
     if errors:
-        raise CliError(f"No se pudo leer {args.source}: {errors[0]}")
+        raise CliError(f"Could not read {args.source}: {errors[0]}")
     if not spec.get("paths"):
         by_name = OpenAPIGenerator.generate_openapi_spec(source, naming_convention=True).get("paths", {})
         if by_name and not args.naming_convention:
             ui.warn(
-                f"No hay rutas con decoradores de Flask o FastAPI, pero {len(by_name)} funciones siguen la "
-                "convención get_/post_/put_/delete_. Si son endpoints, añade --naming-convention."
+                f"No routes with Flask or FastAPI decorators, but {len(by_name)} functions follow the "
+                "get_/post_/put_/delete_ naming convention. If they are endpoints, add --naming-convention."
             )
         else:
-            ui.warn("No se detectó ninguna ruta: el archivo no declara endpoints con decoradores de Flask o FastAPI.")
+            ui.warn("No routes detected: the file declares no endpoints with Flask or FastAPI decorators.")
     return spec
 
 
@@ -174,7 +174,7 @@ def _gen_diagram(args: argparse.Namespace, out: str) -> List[str]:
     ensure_parent(out)
     diagram = ArchitectureDiagramGenerator.generate_mermaid_diagram(source).strip()
     if out.endswith(".md") and not diagram.startswith("```"):
-        diagram = f"# Diagrama de clases de {os.path.basename(source)}\n\n```mermaid\n{diagram}\n```"
+        diagram = f"# Class diagram of {os.path.basename(source)}\n\n```mermaid\n{diagram}\n```"
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(diagram + "\n")
     return [out]
@@ -189,15 +189,15 @@ def _gen_tests(args: argparse.Namespace, out: str) -> List[str]:
     ensure_parent(out)
     build = QATestGenerator.generate_pytest_suite if args.framework == "pytest" else QATestGenerator.generate_test_suite
     if args.record:
-        ui.warn(f"--record importa y ejecuta {rel(source)} para grabar lo que devuelve cada función.")
+        ui.warn(f"--record imports and runs {rel(source)} to record what each function returns.")
     try:
         written = build(source, out, record=args.record)
     except RecordingError as exc:
-        raise CliError(str(exc), "Genera la suite sin --record o corrige el error del módulo.") from exc
+        raise CliError(str(exc), "Generate the suite without --record, or fix the error in the module.") from exc
     if not written:
-        raise CliError(f"No se pudo leer {args.source}: revisa que sea Python válido.")
+        raise CliError(f"Could not read {args.source}: check that it is valid Python.")
     if args.record:
-        ui.hint("Los valores grabados fijan el comportamiento actual: revísalos antes de confiar en ellos.")
+        ui.hint("The recorded values pin down the current behaviour: review them before relying on them.")
     return [out]
 
 
@@ -206,85 +206,89 @@ def _default_tests_output(args: argparse.Namespace) -> str:
     return os.path.join(os.path.dirname(source), f"test_{os.path.basename(source)}")
 
 
-# tipo -> (descripción, salida por defecto, necesita --source, función, siguiente paso)
+# kind -> (description, default output, needs --source, handler, suggested next step).
+# The default output may be a callable when it depends on the arguments (tests sit next to
+# their source file).
 GENERATORS: Dict[str, Tuple[str, Any, bool, Callable[[argparse.Namespace, str], List[str]], Optional[str]]] = {
-    "compose": ("Docker Compose endurecido", "docker-compose.yml", False, _gen_compose, "docker compose -f {out} up"),
-    "helm": ("Chart de Helm sin root ni privilegios", "chart", False, _gen_helm, "helm install mi-servicio {out}"),
-    "k8s": ("Manifiesto de Pod de Kubernetes endurecido", "pod.yaml", False, _gen_k8s, "kubectl apply -f {out}"),
-    "dockerfile": ("Dockerfile multietapa sin root", "Dockerfile.hardened", False, _gen_dockerfile, None),
-    "systemd": ("Unidad systemd endurecida", "app.service", False, _gen_systemd, None),
-    "nginx": ("Configuración de Nginx con TLS y cabeceras de seguridad", "nginx.conf", False, _gen_webserver("nginx"), None),
-    "caddy": ("Caddyfile con TLS y cabeceras de seguridad", "Caddyfile", False, _gen_webserver("caddy"), None),
-    "github-actions": ("Workflow DevSecOps para GitHub Actions", ".github/workflows/devsecops.yml", False, _gen_github, None),
-    "gitlab-ci": ("Pipeline DevSecOps para GitLab CI", ".gitlab-ci.yml", False, _gen_gitlab, None),
-    "linters": ("Configuración de flake8, black, isort, mypy y ESLint", ".", False, _gen_linters, None),
-    "openapi": ("Especificación OpenAPI 3.0.3 (JSON o YAML)", "openapi.json", True, _gen_openapi, None),
-    "swagger": ("Página HTML con Swagger UI", "swagger_ui.html", True, _gen_swagger, "Ábrelo en el navegador (necesita conexión)."),
-    "docs": ("Manual en Markdown a partir de los docstrings", "DOCS.md", True, _gen_docs, None),
-    "diagram": ("Diagrama de clases en Mermaid", "diagrama.md", True, _gen_diagram, None),
-    "tests": ("Suite de tests (unittest o pytest); --record graba los resultados reales", _default_tests_output, True, _gen_tests, "agentes test {out}"),
+    "compose": ("Hardened Docker Compose file", "docker-compose.yml", False, _gen_compose, "docker compose -f {out} up"),
+    "helm": ("Helm chart without root or privileges", "chart", False, _gen_helm, "helm install my-service {out}"),
+    "k8s": ("Hardened Kubernetes Pod manifest", "pod.yaml", False, _gen_k8s, "kubectl apply -f {out}"),
+    "dockerfile": ("Multi-stage Dockerfile running as non-root", "Dockerfile.hardened", False, _gen_dockerfile, None),
+    "systemd": ("Hardened systemd unit", "app.service", False, _gen_systemd, None),
+    "nginx": ("Nginx configuration with TLS and security headers", "nginx.conf", False, _gen_webserver("nginx"), None),
+    "caddy": ("Caddyfile with TLS and security headers", "Caddyfile", False, _gen_webserver("caddy"), None),
+    "github-actions": ("DevSecOps workflow for GitHub Actions", ".github/workflows/devsecops.yml", False, _gen_github, None),
+    "gitlab-ci": ("DevSecOps pipeline for GitLab CI", ".gitlab-ci.yml", False, _gen_gitlab, None),
+    "linters": ("flake8, black, isort, mypy and ESLint configuration", ".", False, _gen_linters, None),
+    "openapi": ("OpenAPI 3.0.3 specification (JSON or YAML)", "openapi.json", True, _gen_openapi, None),
+    "swagger": ("HTML page with Swagger UI", "swagger_ui.html", True, _gen_swagger, "Open it in a browser (needs a connection)."),
+    "docs": ("Markdown manual built from the docstrings", "DOCS.md", True, _gen_docs, None),
+    "diagram": ("Mermaid class diagram", "diagram.md", True, _gen_diagram, None),
+    "tests": ("Test suite (unittest or pytest); --record captures real results", _default_tests_output, True, _gen_tests, "agentes test {out}"),
 }
 
 
 def _print_generators() -> None:
-    ui.title("Tipos que puede generar 'agentes generate'")
+    ui.title("Kinds 'agentes generate' can produce")
     ui.out()
     rows = []
     for name, (desc, default, needs_source, _, _) in GENERATORS.items():
-        out = "test_<fuente>.py" if callable(default) else default
-        rows.append(((name, "bold"), out, desc + (" (requiere --source)" if needs_source else "")))
-    ui.table(["Tipo", "Salida por defecto", "Qué genera"], rows)
+        out = "test_<source>.py" if callable(default) else default
+        rows.append(((name, "bold"), out, desc + (" (requires --source)" if needs_source else "")))
+    ui.table(["Kind", "Default output", "What it generates"], rows)
     ui.out()
-    ui.hint("Ejemplo: agentes generate compose --service api --port 8000")
-    ui.hint("Opciones de cada tipo: agentes generate -h")
+    ui.hint("Example: agentes generate compose --service api --port 8000")
+    ui.hint("Options for each kind: agentes generate -h")
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    """Genera configuraciones endurecidas, pipelines CI, documentación, diagramas o suites de tests."""
+    """Generate hardened configurations, CI pipelines, documentation, diagrams or test suites."""
     if not args.kind:
         _print_generators()
         return 0
     _, default, needs_source, handler, next_step = GENERATORS[args.kind]
     if needs_source and not args.source:
         raise CliError(
-            f"'generate {args.kind}' necesita el archivo Python de origen.",
-            f"Ejemplo: agentes generate {args.kind} --source app.py",
+            f"'generate {args.kind}' needs the Python source file.",
+            f"Example: agentes generate {args.kind} --source app.py",
         )
     out = args.output or (default(args) if callable(default) else default)
     out = os.path.abspath(os.path.expanduser(out))
     written = handler(args, out)
     if not written:
-        ui.warn("No se generó ningún archivo.")
+        ui.warn("No file was generated.")
         return 0
     for path in written:
-        ui.ok(f"Generado: {rel(path)}")
+        ui.ok(f"Generated: {rel(path)}")
     if args.kind == "tests" and args.framework == "pytest":
         next_step = "pytest {out}"
     if next_step:
-        ui.hint(f"Siguiente paso: {next_step.format(out=rel(out))}")
+        ui.hint(f"Next step: {next_step.format(out=rel(out))}")
     return 0
 
 
 def cmd_fix(args: argparse.Namespace) -> int:
-    """Fija dependencias en requirements.txt a versiones recientes de PyPI y verifica CVEs."""
+    """Pin a requirements.txt to recent PyPI versions and check the result for known vulnerabilities."""
     from ..quality import vulnerabilities
     from ..quality.dependency_auditor import DependencyAuditor
     from ..quality.package_index import is_offline
 
     path = require_path(args.path, "file")
     if args.default_version is not None and not args.json:
-        ui.warn("--default-version ya no tiene efecto: las versiones se consultan en PyPI.")
+        ui.warn("--default-version has no effect: versions are looked up on PyPI.")
     if is_offline():
         raise CliError(
-            "'fix' necesita consultar PyPI para elegir versiones y está activo el modo sin conexión.",
-            "Quita --offline o la variable AGENTES_OFFLINE.",
+            "'fix' needs to query PyPI to choose versions, but offline mode is on.",
+            "Remove --offline or unset AGENTES_OFFLINE.",
         )
 
     plan = DependencyAuditor.plan_requirements_fix(path)
     if not args.dry_run:
         plan.apply()
 
-    # Vulnerabilidades de las versiones que quedan fijadas (las nuevas y las que ya lo estaban).
+    # Check the versions that end up pinned (newly pinned and already pinned) against OSV.
+    # The scanner reads manifests from disk, so the planned content goes to a temporary file;
+    # with --dry-run the real file is never touched.
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="requirements-", suffix=".txt")
     with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
         fh.writelines(plan.fixed)
@@ -305,33 +309,33 @@ def cmd_fix(args: argparse.Namespace) -> int:
         return code
 
     if plan.changes:
-        ui.title(f"{'Cambios propuestos' if args.dry_run else 'Cambios aplicados'} en {rel(path)}")
+        ui.title(f"{'Proposed changes' if args.dry_run else 'Applied changes'} in {rel(path)}")
         ui.out()
         for _, old, new in plan.changes:
             ui.out(f"  {ui.style('- ' + old, 'red')}")
             ui.out(f"  {ui.style('+ ' + new, 'green')}")
     else:
-        ui.ok(f"{rel(path)} no tiene versiones que fijar.")
+        ui.ok(f"{rel(path)} has no versions to pin.")
 
     if plan.unresolved:
-        ui.section("Sin cambios")
+        ui.section("Unchanged")
         for line, package, reason in plan.unresolved:
-            ui.bullet(f"Línea {line}, {package}: {reason}.")
+            ui.bullet(f"Line {line}, {package}: {reason}.")
 
-    ui.section("Vulnerabilidades conocidas")
+    ui.section("Known vulnerabilities")
     if scan.error:
-        ui.warn(f"No se pudo consultar OSV: {scan.error}")
+        ui.warn(f"Could not query OSV: {scan.error}")
     else:
-        show_findings(vulns, args.limit, empty="Ninguna en las versiones resultantes.")
+        show_findings(vulns, args.limit, empty="None in the resulting versions.")
 
     ui.out()
     if args.dry_run:
         ui.hint(
-            f"No se ha modificado nada. Quita --dry-run para aplicar las {len(plan.changes)} correcciones."
-            if plan.changes else "No se ha modificado nada."
+            f"Nothing was modified. Remove --dry-run to apply the {len(plan.changes)} changes."
+            if plan.changes else "Nothing was modified."
         )
     elif plan.changes:
-        ui.ok(f"{len(plan.changes)} correcciones aplicadas con la última versión publicada que cumple cada requisito.")
+        ui.ok(f"{len(plan.changes)} changes applied, each using the latest published version that satisfies its requirement.")
     if vulns:
-        ui.hint("Las versiones que ya estaban fijadas no se cambian: actualízalas a la versión corregida indicada.")
+        ui.hint("Versions that were already pinned are not changed: upgrade them to the fixed version shown.")
     return code

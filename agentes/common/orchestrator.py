@@ -1,9 +1,9 @@
 """
-Orquestador del pipeline.
+Pipeline orchestrator.
 
-Ejecuta las seis etapas sobre un archivo o directorio (análisis estático, secretos, métricas y
-SOLID, OpenAPI, infraestructura y vulnerabilidades en dependencias), aplica la línea base y los
-hallazgos silenciados en su línea, y escribe los informes JSON, HTML y SARIF.
+Runs the six stages over a file or directory (static analysis, secrets, metrics and SOLID,
+OpenAPI, infrastructure and dependency vulnerabilities), applies inline suppressions and the
+baseline, and writes the JSON, HTML and SARIF reports.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _is_secret_config_file(filename: str) -> bool:
 
 
 def _iter_secret_scan_files(target: str, py_scanned: List[str], *, reports_dir: Optional[str] = None) -> List[str]:
-    """Combina los .py escaneados con archivos de configuración susceptibles de contener secretos."""
+    """The scanned .py files plus every configuration file that could hold secrets."""
     extra_files: List[str] = []
     seen = set(py_scanned)
     reports_abs = os.path.abspath(reports_dir) if reports_dir else None
@@ -122,7 +122,7 @@ def _iter_infra_files(target: str, *, reports_dir: Optional[str] = None) -> List
 
 
 def _iter_dependency_manifests(target: str, *, reports_dir: Optional[str] = None) -> List[str]:
-    """requirements*.txt, package.json y archivos de bloqueo (package-lock, poetry.lock, Pipfile.lock)."""
+    """requirements*.txt, package.json and lock files (package-lock, poetry.lock, Pipfile.lock)."""
     from ..quality.vulnerabilities import manifest_reader
 
     if os.path.isfile(target):
@@ -144,10 +144,10 @@ def dependency_vulnerability_stage(
     keep: Optional[Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]] = None,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """
-    Etapa de vulnerabilidades conocidas (OSV). Devuelve (etapa, hallazgos).
+    Known-vulnerability stage (OSV). Returns (stage, findings).
 
-    check=None consulta OSV salvo con AGENTES_OFFLINE=1. Si no hay conexión, la etapa queda
-    como "skipped" y no hace fallar el pipeline: no haber podido comprobar no es un hallazgo.
+    check=None queries OSV unless AGENTES_OFFLINE=1. Without a connection the stage is marked
+    "skipped" and does not fail the pipeline: being unable to check is not a finding.
     """
     from ..quality import vulnerabilities
     from ..quality.package_index import is_offline
@@ -162,22 +162,23 @@ def dependency_vulnerability_stage(
     if check is None:
         check = not is_offline()
     if not manifests and not environments:
-        stage.update(status="ok", summary="sin manifiestos de dependencias ni entornos instalados")
+        stage.update(status="ok", summary="no dependency manifests or installed environments")
         return stage, []
     if not check:
-        stage.update(status="skipped", summary=f"omitida: modo sin conexión · {len(manifests)} manifiestos sin comprobar")
+        stage.update(status="skipped", summary=f"skipped: offline mode · {len(manifests)} manifests not checked")
         return stage, []
 
     result = vulnerabilities.scan(manifests, environments=environments, root=root)
     if result.error:
-        stage.update(status="skipped", summary=f"omitida: {result.error}")
+        stage.update(status="skipped", summary=f"skipped: {result.error}")
         return stage, []
     if result.unchecked:
-        # Decir "0 vulnerabilidades" sin haber comprobado nada daría una falsa sensación de seguridad.
+        # Reporting "0 vulnerabilities" when nothing could be checked would give a false sense of
+        # security, so the stage is marked as skipped instead.
         stage.update(
             status="skipped",
-            summary=(f"sin comprobar: ninguna dependencia con versión exacta ni entorno instalado "
-                     f"({result.unpinned} declaradas con rangos). Usa un archivo de bloqueo o un .venv en el proyecto"),
+            summary=(f"not checked: no dependency with an exact version and no installed environment "
+                     f"({result.unpinned} declared with ranges). Add a lock file or a .venv to the project"),
             dependencies_checked=0, dependencies_unpinned=result.unpinned,
         )
         return stage, []
@@ -185,13 +186,13 @@ def dependency_vulnerability_stage(
     if keep is not None:
         items = keep(items)
     high = blocking_count(items)
-    parts = [f"{len(items)} vulnerabilidades ({high} altas/críticas) en {result.checked} paquetes"]
+    parts = [f"{len(items)} vulnerabilities ({high} high/critical) in {result.checked} packages"]
     if result.installed:
-        parts.append(f"{result.installed} instalados en {', '.join(stage['environments'])}")
+        parts.append(f"{result.installed} installed in {', '.join(stage['environments'])}")
     elif result.unpinned:
-        parts.append(f"{result.unpinned} sin versión exacta (no comprobables)")
+        parts.append(f"{result.unpinned} without an exact version (cannot be checked)")
     if result.blocked_fixes:
-        parts.append(f"{len(result.blocked_fixes)} restricciones impiden instalar la corrección")
+        parts.append(f"{len(result.blocked_fixes)} constraints block installing the fix")
     stage.update(
         status="fail" if (fail_on_high and high) else "ok",
         summary=" · ".join(parts),
@@ -212,9 +213,10 @@ def audit_infra_and_deps(
     reports_dir: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
-    Audita Dockerfiles, unidades systemd, requirements*.txt, package.json y YAML/K8s.
+    Audit Dockerfiles, systemd units, requirements*.txt, package.json and YAML/Kubernetes files.
+    Returns (findings, number of files audited).
 
-    agents_root se conserva por compatibilidad y no se usa.
+    agents_root is accepted so existing callers keep working; it is ignored.
     """
     infra_files = _iter_infra_files(target, reports_dir=reports_dir)
     findings: List[Dict[str, Any]] = []
@@ -225,12 +227,12 @@ def audit_infra_and_deps(
     return findings, len(infra_files)
 
 
-# Etapas cuyo fallo hace fallar el pipeline. Métricas y documentación informan, pero no bloquean.
+# Stages whose failure fails the pipeline. Metrics and documentation are informational only.
 _GATING_STAGES = frozenset({"quality_sast", "defensive_secrets", "infra_and_deps", "dependency_vulns"})
 
 
 class _PipelineRun(NamedTuple):
-    """Lo que comparten las etapas de una ejecución del pipeline."""
+    """State shared by the stages of one pipeline run."""
 
     target: str
     root: str
@@ -244,8 +246,8 @@ class _PipelineRun(NamedTuple):
 
     def keep(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Quita los hallazgos silenciados en su línea y después los aceptados en la línea base.
-        Tiene estado: el orden de llamada cuenta.
+        Drop findings suppressed on their own line, then the ones accepted by the baseline.
+        This is stateful: each baseline entry is consumed once, so call order matters.
         """
         items = self.inline.filter(items)
         return self.accepted.filter(items) if self.accepted else list(items)
@@ -256,7 +258,7 @@ class _PipelineRun(NamedTuple):
 
     @property
     def truncated_note(self) -> str:
-        return f" · {self.skipped} archivos NO escaneados (max_files={self.max_files})" if self.skipped else ""
+        return f" · {self.skipped} files NOT scanned (max_files={self.max_files})" if self.skipped else ""
 
     @property
     def coverage(self) -> Dict[str, int]:
@@ -276,17 +278,18 @@ def run_pipeline(
     exclude: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """
-    Ejecuta pipeline DevSecOps sobre un directorio/archivo.
-    agents_root se conserva por compatibilidad y no se usa.
-    check_vulnerabilities=None consulta OSV salvo con AGENTES_OFFLINE=1.
-    baseline: ruta a una línea base (ver agentes.common.baseline). Los hallazgos aceptados
-    no cuentan para el estado de las etapas ni para el código de salida.
-    exclude: archivos que no se analizan (la propia línea base contiene fragmentos de secretos).
-    max_files limita cuántos .py se escanean (None = todos); si recorta, queda
-    reflejado en el reporte en vez de perderse en silencio.
-    prefer_bandit=False fuerza el motor AST: bandit lanza un subproceso por
-    archivo, así que en árboles grandes domina el tiempo total.
-    Retorna (report_dict, exit_code).
+    Run the DevSecOps pipeline over a directory or a single file. Returns (report, exit_code).
+
+    agents_root: accepted so existing callers keep working; it is ignored.
+    check_vulnerabilities: None queries OSV unless AGENTES_OFFLINE=1.
+    baseline: path to a baseline file (see agentes.common.baseline). Accepted findings count
+        neither towards stage status nor towards the exit code.
+    exclude: files that are not analysed. The baseline itself is always excluded, because it
+        quotes fragments of the secrets it accepts.
+    max_files: caps how many .py files are scanned (None = all). When it truncates, the report
+        says so instead of silently covering less code.
+    prefer_bandit: False forces the AST engine only. Bandit runs in a subprocess, which
+        dominates the total time on large trees.
     """
     target = os.path.abspath(target)
     root = os.path.dirname(target) if os.path.isfile(target) else target
@@ -299,7 +302,7 @@ def run_pipeline(
                        InlineSuppressions())
     not_scanned = {os.path.abspath(p) for p in [*(exclude or []), *([baseline] if baseline else [])]}
 
-    # El orden de las etapas importa: la línea base descuenta cada hallazgo aceptado una sola vez.
+    # Stage order matters: the baseline consumes each accepted finding exactly once.
     sast, sast_raw, sast_findings = _sast_stage(run, prefer_bandit)
     secrets, secret_findings = _secrets_stage(run, not_scanned)
     metrics, design_findings = _metrics_stage(run, sast_raw)
@@ -326,21 +329,22 @@ def run_pipeline(
 
 
 def _sast_stage(run: _PipelineRun, prefer_bandit: bool) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Análisis estático en lote (Bandit + reglas AST). Devuelve (etapa, hallazgos sin filtrar, hallazgos)."""
+    """Batch static analysis (Bandit + AST rules). Returns (stage, unfiltered findings, findings)."""
     from ..quality.static_checker import StaticCodeAnalyzer
 
     sast_raw = [f.to_dict() for f in audits.sast(run.scanned, prefer_bandit=prefer_bandit)]
     findings = run.keep(sast_raw)
     high = blocking_count(findings)
     bandit_used = prefer_bandit and bool(run.scanned) and StaticCodeAnalyzer.bandit_command() is not None
-    # Que falte Bandit no debe pasar desapercibido: el análisis queda solo con el motor AST.
-    engine_note = " · sin Bandit (solo motor AST; instala el extra 'sast')" if prefer_bandit and run.scanned and not bandit_used else ""
+    # A missing Bandit must not go unnoticed: the analysis then relies on the AST engine alone.
+    engine_note = (" · without Bandit (AST engine only; install the 'sast' extra)"
+                   if prefer_bandit and run.scanned and not bandit_used else "")
     stage = {
         "name": "quality_sast",
         "status": "fail" if (run.fail_on_high and high) else "ok",
         "summary": (
-            f"{len(findings)} hallazgos SAST ({high} altos/críticos) "
-            f"en {len(run.scanned)} de {len(run.py_files)} archivos{run.truncated_note}{engine_note}"
+            f"{len(findings)} SAST findings ({high} high/critical) "
+            f"in {len(run.scanned)} of {len(run.py_files)} files{run.truncated_note}{engine_note}"
         ),
         "findings_count": len(findings),
         **run.coverage,
@@ -350,7 +354,7 @@ def _sast_stage(run: _PipelineRun, prefer_bandit: bool) -> Tuple[Dict[str, Any],
 
 
 def _secrets_stage(run: _PipelineRun, not_scanned: Set[str]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Secretos en el código Python y en la configuración (.env, YAML, JSON, INI...)."""
+    """Secrets in Python code and configuration files (.env, YAML, JSON, INI...)."""
     secret_files = [f for f in _iter_secret_scan_files(run.target, run.scanned, reports_dir=run.reports_dir)
                     if os.path.abspath(f) not in not_scanned]
     extra_config_count = len(secret_files) - len(run.scanned)
@@ -358,7 +362,7 @@ def _secrets_stage(run: _PipelineRun, not_scanned: Set[str]) -> Tuple[Dict[str, 
     scan_errors: List[Dict[str, Any]] = []
     for fp in secret_files:
         for item in audits.scan_secrets(fp):
-            # Un archivo que no se pudo leer no cuenta como limpio: va aparte y también hace fallar la etapa.
+            # An unreadable file never counts as clean: it is listed separately and fails the stage too.
             (scan_errors if item.rule_id == "SECRET-SCAN-ERROR" else secret_findings).append(item.to_dict())
     secret_findings, scan_errors = run.keep(secret_findings), run.keep(scan_errors)
 
@@ -367,9 +371,9 @@ def _secrets_stage(run: _PipelineRun, not_scanned: Set[str]) -> Tuple[Dict[str, 
         "name": "defensive_secrets",
         "status": "fail" if (secret_findings or scan_errors) else "ok",
         "summary": (
-            f"{len(secret_findings)} posibles secretos/config insegura "
-            f"en {len(run.scanned)} de {len(run.py_files)} archivos{extra_note}{run.truncated_note}"
-            + (f" · {len(scan_errors)} ilegibles" if scan_errors else "")
+            f"{len(secret_findings)} possible secrets/insecure settings "
+            f"in {len(run.scanned)} of {len(run.py_files)} files{extra_note}{run.truncated_note}"
+            + (f" · {len(scan_errors)} unreadable" if scan_errors else "")
         ),
         "findings_count": len(secret_findings) + len(scan_errors),
         "scan_errors": len(scan_errors),
@@ -380,11 +384,11 @@ def _secrets_stage(run: _PipelineRun, not_scanned: Set[str]) -> Tuple[Dict[str, 
 
 
 class _MetricsAccumulator:
-    """Métricas, hallazgos SOLID y de rendimiento y recomendaciones situadas, archivo a archivo."""
+    """Collects metrics, SOLID and performance findings and per-line recommendations, file by file."""
 
     def __init__(self, root: str, inline: Optional[InlineSuppressions] = None) -> None:
         self.root = root
-        # Lo silenciado en su línea no aparece como hallazgo ni genera recomendación.
+        # Anything suppressed on its line is neither reported nor turned into a recommendation.
         self.inline = inline or InlineSuppressions()
         self.total_lines = 0
         self.code_loc = 0
@@ -408,8 +412,8 @@ class _MetricsAccumulator:
         else:
             file_perf = self._add_metrics(fp, fm)
         file_solid = self._add_solid(fp, SOLIDChecker.audit_file(fp))
-        # Las recomendaciones de una línea concreta llevan su archivo: con varios archivos,
-        # "Línea N" sola no dice de cuál es.
+        # Recommendations tied to a line carry their file: across several files, "Line N" alone
+        # would not say which file it refers to.
         self.located_recs.extend(RefactorSuggester.generate_recommendations(
             {"performance_findings": file_perf}, file_solid, praise_if_clean=False,
             location=os.path.relpath(fp, self.root).replace(os.sep, "/"),
@@ -424,8 +428,8 @@ class _MetricsAccumulator:
                      if level != "ERROR" and not self.inline.silences(
                          {"file": fp, "line": line, "level": level, "message": f"[{cat}] {msg}", "rule_id": "PERF"})]
         self.perf_findings.extend(file_perf)
-        # En el pipeline el rendimiento se registra como MEDIO: orienta, no bloquea.
-        self.perf_items.extend({"file": fp, "line": line, "level": "MEDIO", "message": f"[{cat}] {msg}", "rule_id": "PERF"}
+        # Performance findings are recorded as MEDIUM in the pipeline: they guide, never block.
+        self.perf_items.extend({"file": fp, "line": line, "level": "MEDIUM", "message": f"[{cat}] {msg}", "rule_id": "PERF"}
                                for line, cat, _, msg in file_perf)
         return file_perf
 
@@ -457,23 +461,23 @@ def _average(values: List[float], *, default: float) -> float:
 
 
 def _metrics_stage(run: _PipelineRun, sast_raw: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Complejidad, auditoría SOLID y rendimiento sobre todo lo analizado. Informa, no bloquea."""
+    """Complexity, SOLID audit and performance over everything analysed. Informational, never blocking."""
     acc = _MetricsAccumulator(run.root, run.inline)
     for fp in run.scanned:
         acc.add_file(fp)
 
-    # Lo que SOLID o rendimiento repiten del análisis estático (misma línea y tema) no se cuenta dos veces.
+    # Whatever SOLID or performance repeat from static analysis (same line and topic) is counted once.
     solid_items = run.keep(audits.drop_covered(acc.solid_items, sast_raw))
     perf_items = run.keep(audits.drop_covered(acc.perf_items, sast_raw))
     summary = acc.summary(len(run.scanned))
-    perf_note = f" · {len(perf_items)} de rendimiento" if perf_items else ""
+    perf_note = f" · {len(perf_items)} performance" if perf_items else ""
     stage = {
         "name": "refactor_metrics",
         "status": "fail" if (run.scanned and acc.errors and len(acc.errors) == len(run.scanned)) else "ok",
         "summary": (
             f"avg_cyclomatic={summary['avg_cyclomatic_complexity']} "
             f"avg_cognitive={summary['avg_cognitive_complexity']} "
-            f"· {len(run.scanned)} archivos · {len(solid_items)} hallazgos SOLID{perf_note}"
+            f"· {len(run.scanned)} files · {len(solid_items)} SOLID findings{perf_note}"
         ),
         "findings_count": len(solid_items) + len(perf_items),
         "files_analyzed": len(run.scanned),
@@ -485,7 +489,7 @@ def _metrics_stage(run: _PipelineRun, sast_raw: List[Dict[str, Any]]) -> Tuple[D
 
 
 def _metrics_recommendations(summary: Dict[str, Any], acc: _MetricsAccumulator, scanned: bool) -> List[str]:
-    """Las de promedios se valoran sobre el conjunto; las de una línea concreta llevan su archivo."""
+    """Average-based advice is judged on the whole run; line-specific advice carries its file."""
     from ..refactor.refactor_suggester import EXCELLENT, RefactorSuggester
 
     if not scanned:
@@ -493,23 +497,23 @@ def _metrics_recommendations(summary: Dict[str, Any], acc: _MetricsAccumulator, 
     averages = {k: v for k, v in summary.items() if k != "performance_findings"}
     recommendations = list(dict.fromkeys(
         RefactorSuggester.generate_recommendations(averages, [], praise_if_clean=False) + acc.located_recs))
-    # El elogio solo procede si nada tiene recomendaciones y todo se pudo analizar.
+    # Praise only when nothing needs attention and every file could be analysed.
     if not recommendations and not acc.errors:
         return [EXCELLENT]
     return recommendations
 
 
 def _documentation_stage(run: _PipelineRun) -> Dict[str, Any]:
-    """Contrato OpenAPI combinando las rutas de todos los módulos analizados."""
+    """OpenAPI contract built from the routes of every analysed module."""
     from ..docs.openapi_generator import OpenAPIGenerator
 
     frameworks = OpenAPIGenerator.detect_web_frameworks(run.scanned) if run.scanned else []
     if not frameworks:
-        # Sin framework web, las funciones get_/post_ son helpers, no endpoints: no se inventa una API.
+        # Without a web framework, get_/post_ functions are helpers, not endpoints, so no API is invented.
         return {
             "name": "documentation",
             "status": "skipped",
-            "summary": "omitida: no se detectó un framework web (Flask, FastAPI, Django...)",
+            "summary": "skipped: no web framework detected (Flask, FastAPI, Django...)",
             "findings_count": 0,
             "files_analyzed": len(run.scanned),
             "errors": [],
@@ -523,8 +527,8 @@ def _documentation_stage(run: _PipelineRun) -> Dict[str, Any]:
         "name": "documentation",
         "status": "fail" if docs_errors else "ok",
         "summary": (
-            f"{', '.join(frameworks)}: {openapi_paths} rutas en {len(run.scanned)} archivos"
-            + ("" if openapi_paths else " (sin rutas con decoradores reconocibles)")
+            f"{', '.join(frameworks)}: {openapi_paths} routes in {len(run.scanned)} files"
+            + ("" if openapi_paths else " (no routes with recognisable decorators)")
             + (f" · {docs_errors[0]}" if docs_errors else "")
         ),
         "findings_count": 0,
@@ -535,7 +539,7 @@ def _documentation_stage(run: _PipelineRun) -> Dict[str, Any]:
 
 
 def _infra_stage(run: _PipelineRun) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Dockerfiles, unidades systemd, dependencias declaradas y YAML del proyecto."""
+    """The project's Dockerfiles, systemd units, declared dependencies and YAML files."""
     infra_findings, infra_files_count = audit_infra_and_deps(run.target, reports_dir=run.reports_dir)
     infra_findings = run.keep(infra_findings)
     infra_high = blocking_count(infra_findings)
@@ -543,8 +547,8 @@ def _infra_stage(run: _PipelineRun) -> Tuple[Dict[str, Any], List[Dict[str, Any]
         "name": "infra_and_deps",
         "status": "fail" if (run.fail_on_high and infra_high) else "ok",
         "summary": (
-            f"{len(infra_findings)} hallazgos ({infra_high} altos/críticos) "
-            f"en {infra_files_count} archivos de infra/deps/YAML"
+            f"{len(infra_findings)} findings ({infra_high} high/critical) "
+            f"in {infra_files_count} infra/deps/YAML files"
         ),
         "findings_count": len(infra_findings),
         "files_scanned": infra_files_count,
@@ -553,7 +557,7 @@ def _infra_stage(run: _PipelineRun) -> Tuple[Dict[str, Any], List[Dict[str, Any]
 
 
 def _write_reports(report: Dict[str, Any], run: _PipelineRun) -> Dict[str, str]:
-    """Escribe pipeline.json, pipeline.html y pipeline.sarif. El JSON se reescribe con sus rutas."""
+    """Write pipeline.json, pipeline.html and pipeline.sarif, then rewrite the JSON with their paths."""
     json_path = write_json_report(report, os.path.join(run.reports_dir, "pipeline.json"))
     html_path = write_html_summary(report, os.path.join(run.reports_dir, "pipeline.html"))
     sarif_path = findings_to_sarif(

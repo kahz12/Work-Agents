@@ -21,11 +21,12 @@ from .package_index import (
 
 def package_dependencies(directory: str) -> Set[str]:
     """
-    Nombres normalizados de las dependencias que declara el pyproject.toml del directorio
-    ([project] dependencies y sus extras). Vacío si no hay o no se puede leer.
+    Normalised names of the dependencies declared by the directory's pyproject.toml
+    ([project] dependencies and its extras). Empty when there is none or it cannot be read.
 
-    Un requirements.txt que las repite con rangos no es un descuido: copia el contrato del
-    paquete, y en una biblioteca fijar versiones exactas impediría instalarla junto a otras.
+    A requirements.txt that repeats them with ranges is not an oversight: it mirrors the
+    package's contract, and pinning exact versions in a library would stop it from being
+    installed alongside other packages.
     """
     path = os.path.join(directory, "pyproject.toml")
     if not os.path.isfile(path):
@@ -50,13 +51,13 @@ def package_dependencies(directory: str) -> Set[str]:
 
 @dataclass
 class FixPlan:
-    """Cambios propuestos sobre un requirements.txt."""
+    """Proposed changes to a requirements.txt. Nothing is written until apply() is called."""
 
     filepath: str
     original: List[str]
     fixed: List[str]
-    changes: List[Tuple[int, str, str]] = field(default_factory=list)      # (línea, antes, después)
-    unresolved: List[Tuple[int, str, str]] = field(default_factory=list)   # (línea, paquete, motivo)
+    changes: List[Tuple[int, str, str]] = field(default_factory=list)      # (line, before, after)
+    unresolved: List[Tuple[int, str, str]] = field(default_factory=list)   # (line, package, reason)
 
     def apply(self) -> None:
         if self.changes:
@@ -66,10 +67,11 @@ class FixPlan:
 
 class DependencyAuditor:
     """
-    Auditor defensivo de dependencias y paquetes de software.
-    Identifica versiones no fijadas (*unpinned*) y rangos abiertos (>=, ~=), y los fija a
-    la versión más reciente publicada en PyPI que cumple lo declarado. Nunca inventa una
-    versión ni fija al límite inferior de un rango.
+    Dependency auditor for requirements.txt and package.json.
+
+    Flags unpinned dependencies and open ranges (>=, ~=), and can pin them to the newest
+    version published on PyPI that satisfies the declaration. It never invents a version and
+    never pins to the lower bound of a range.
     """
 
     _REQ_RE = re.compile(
@@ -81,7 +83,8 @@ class DependencyAuditor:
     @staticmethod
     def _parse_requirement_line_full(line: str) -> Optional[Tuple[str, Optional[str], Optional[str], str, str]]:
         """
-        Retorna (nombre, operador, versión, marcador, comentario) o None si no aplica.
+        Split a requirement line into (name, operator, version, environment marker, trailing
+        comment). None for blank lines, comments and pip options (-r, -e, --index-url...).
         """
         raw = line.rstrip("\r\n")
         stripped = raw.strip()
@@ -100,7 +103,7 @@ class DependencyAuditor:
     @staticmethod
     def _parse_requirement_line(line: str) -> Optional[Tuple[str, Optional[str], Optional[str]]]:
         """
-        Retorna (nombre, operador, versión) o None si no es una línea de requisito.
+        (name, operator, version), or None when the line is not a requirement.
         """
         full = DependencyAuditor._parse_requirement_line_full(line)
         if not full:
@@ -117,11 +120,11 @@ class DependencyAuditor:
         index: Optional[VersionIndex] = None,
     ) -> Optional[str]:
         """
-        La versión más reciente, estable y no retirada que cumple specifier.
+        The newest stable, non-yanked version that satisfies specifier.
 
-        None si no se puede saber (sin red, use_pypi=False o paquete inexistente). No hay
-        catálogo local: una lista fija de versiones envejece y acaba recomendando versiones
-        con vulnerabilidades conocidas.
+        None when it cannot be known (no network, use_pypi=False or unknown package). There is
+        deliberately no local catalogue: a hardcoded version list goes stale and ends up
+        recommending versions with known vulnerabilities.
         """
         if index is None:
             if not use_pypi or is_offline():
@@ -135,12 +138,13 @@ class DependencyAuditor:
     @staticmethod
     def audit_requirements_txt(filepath: str) -> List[Tuple[str, str, str]]:
         """
-        Audita un archivo requirements.txt.
-        Retorna lista de (Nombre_Paquete, Nivel_Riesgo, Recomendación).
+        Audit a requirements.txt file.
+        Returns a list of (package, risk level, recommendation) tuples. Ranges that mirror the
+        dependencies declared in a sibling pyproject.toml are not reported.
         """
         findings = []
         if not os.path.exists(filepath):
-            return [("N/A", "INFORMACION", f"Archivo {filepath} no encontrado.")]
+            return [("N/A", "INFO", f"File {filepath} not found.")]
 
         declared = package_dependencies(os.path.dirname(os.path.abspath(filepath)))
         with open(filepath, "r", encoding="utf-8") as f:
@@ -154,24 +158,24 @@ class DependencyAuditor:
                 if op is None:
                     findings.append((
                         name,
-                        "MEDIO",
-                        f"Línea {line_idx}: La dependencia '{name}' no especifica una versión fija (==x.y.z). Esto puede causar cambios no deseados al instalar."
+                        "MEDIUM",
+                        f"Line {line_idx}: dependency '{name}' does not pin a version (==x.y.z). Installs can pick up unwanted changes."
                     ))
                 elif op == ">=":
                     findings.append((
                         f"{name}{op}{ver}",
-                        "BAJO",
-                        f"Línea {line_idx}: La dependencia '{name}{op}{ver}' usa '>='. Se recomienda fijar la versión exacta para entornos reproducibles."
+                        "LOW",
+                        f"Line {line_idx}: dependency '{name}{op}{ver}' uses '>='. Pin the exact version for reproducible environments."
                     ))
                 elif op == "~=":
                     findings.append((
                         f"{name}{op}{ver}",
-                        "BAJO",
-                        f"Línea {line_idx}: La dependencia '{name}{op}{ver}' usa '~='. Se recomienda fijar == para builds reproducibles."
+                        "LOW",
+                        f"Line {line_idx}: dependency '{name}{op}{ver}' uses '~='. Pin with == for reproducible builds."
                     ))
 
         if not findings:
-            findings.append(("TODAS", "OK", "Todas las dependencias están correctamente especificadas con versiones fijas."))
+            findings.append(("ALL", "OK", "Every dependency is pinned to an exact version."))
 
         return findings
 
@@ -184,12 +188,13 @@ class DependencyAuditor:
         timeout: float = 10.0,
     ) -> "FixPlan":
         """
-        Calcula los cambios sin escribir nada.
+        Work out the changes without writing anything.
 
-        - Sin versión: `==` a la versión más reciente publicada.
-        - `>=`, `~=` o `>` (con pin_ranges): `==` a la versión más reciente que cumple el rango.
-        Lo que no se puede resolver (sin red, paquete inexistente, ninguna versión cumple el
-        rango) se deja como está y se informa en unresolved.
+        - No version: `==` the newest published version.
+        - `>=`, `~=` or `>` (with pin_ranges): `==` the newest version that satisfies the range.
+        Anything that cannot be resolved (no network, unknown package, no version satisfies
+        the range) is left as it is and reported in `unresolved`. Environment markers and
+        trailing comments are preserved.
         """
         if index is None:
             if is_offline():
@@ -216,13 +221,13 @@ class DependencyAuditor:
             try:
                 new_ver = best_version(lookup(name), specifier)
             except PackageNotFound:
-                plan.unresolved.append((idx + 1, name, "no existe en PyPI"))
+                plan.unresolved.append((idx + 1, name, "not found on PyPI"))
                 continue
             except IndexUnavailable as exc:
                 plan.unresolved.append((idx + 1, name, str(exc)))
                 continue
             if new_ver is None:
-                plan.unresolved.append((idx + 1, name, f"ninguna versión publicada cumple '{specifier}'"))
+                plan.unresolved.append((idx + 1, name, f"no published version satisfies '{specifier}'"))
                 continue
             marker_part = f" {marker}" if marker else ""
             newline = "\n" if line.endswith("\n") else ""
@@ -232,7 +237,7 @@ class DependencyAuditor:
 
     @staticmethod
     def _offline_index(name: str) -> List[str]:
-        raise IndexUnavailable("modo sin conexión (AGENTES_OFFLINE)")
+        raise IndexUnavailable("offline mode (AGENTES_OFFLINE)")
 
     @staticmethod
     def auto_fix_requirements_txt(
@@ -244,15 +249,15 @@ class DependencyAuditor:
         index: Optional[VersionIndex] = None,
     ) -> Tuple[str, int]:
         """
-        Fija las versiones de un requirements.txt y lo reescribe. Retorna (ruta, correcciones).
+        Pin the versions in a requirements.txt and rewrite it. Returns (path, number of changes).
 
-        default_version se conserva por compatibilidad y no se usa: fijar una versión
-        inventada puede apuntar a una que no existe o que tiene vulnerabilidades.
-        Con use_pypi=False y sin index no se cambia nada.
+        default_version is accepted so existing callers keep working, but it is ignored (with
+        a DeprecationWarning): pinning a made-up version can point at one that does not exist
+        or has known vulnerabilities. With use_pypi=False and no index, nothing changes.
         """
         if default_version is not None:
             warnings.warn(
-                "default_version ya no tiene efecto: las versiones se resuelven en PyPI.",
+                "default_version has no effect: versions are resolved on PyPI.",
                 DeprecationWarning, stacklevel=2,
             )
         if not os.path.exists(filepath):
@@ -266,11 +271,12 @@ class DependencyAuditor:
     @staticmethod
     def audit_package_json(filepath: str) -> List[Tuple[str, str, str]]:
         """
-        Audita un archivo package.json de Node.js.
+        Audit a Node.js package.json: dependencies and devDependencies declared with '^', '~'
+        or '*' instead of an exact version.
         """
         findings = []
         if not os.path.exists(filepath):
-            return [("N/A", "INFORMACION", f"Archivo {filepath} no encontrado.")]
+            return [("N/A", "INFO", f"File {filepath} not found.")]
 
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -284,14 +290,14 @@ class DependencyAuditor:
                 if ver.startswith("^") or ver.startswith("~") or ver == "*":
                     findings.append((
                         pkg,
-                        "MEDIO",
-                        f"La versión '{ver}' de '{pkg}' usa comodines ('^', '~', '*'). Fijar la versión exacta mejora la estabilidad y reproductibilidad."
+                        "MEDIUM",
+                        f"Version '{ver}' of '{pkg}' uses a wildcard ('^', '~', '*'). Pinning the exact version makes builds stable and reproducible."
                     ))
 
             if not findings:
-                findings.append(("TODAS", "OK", "Todas las dependencias en package.json tienen versiones fijas."))
+                findings.append(("ALL", "OK", "Every dependency in package.json has an exact version."))
 
         except Exception as e:
-            findings.append(("PACKAGE.JSON", "ERROR", f"Error al parsear el archivo: {str(e)}"))
+            findings.append(("PACKAGE.JSON", "ERROR", f"Could not parse the file: {str(e)}"))
 
         return findings

@@ -14,13 +14,13 @@ def print_header(title: str):
     print("=" * 65)
 
 def main():
-    print_header("Agente de Refactorización y Arquitectura")
-    print("Módulos de Complejidad Cognitiva y Diagramas Mermaid.js cargados.")
+    print_header("Refactoring and Architecture Agent")
+    print("Loaded modules: cognitive complexity and Mermaid.js diagrams.")
 
     current_dir = agent_output_dir(__file__)
 
-    # Análisis estructural de métricas ciclomáticas, complejidad cognitiva y rendimiento algorítmico.
-    print_header("Demostración 1: Métricas de Código y Complejidad Cognitiva")
+    # Cyclomatic and cognitive complexity plus the performance audit, on a deliberately messy class.
+    print_header("Demo 1: Code metrics and cognitive complexity")
 
     sample_file = os.path.join(current_dir, "sample_monolith.py")
     monolith_code = '''class MonolithicService:
@@ -28,15 +28,15 @@ def main():
         self.db = DatabaseClient()
         self.logger = FileLogger()
 
-    def procesar_datos(self, tipo, datos):
-        if tipo == "A":
-            if datos:
-                for x in datos:
+    def process_data(self, kind, data):
+        if kind == "A":
+            if data:
+                for x in data:
                     if x > 10 and x < 100:
                         print(x)
-        elif tipo == "B":
-            while datos:
-                datos.pop()
+        elif kind == "B":
+            while data:
+                data.pop()
 
     def m1(self): pass
     def m2(self): pass
@@ -54,37 +54,37 @@ def main():
         f.write(monolith_code)
 
     metrics = CodeMetricsCalculator.calculate_file_metrics(sample_file)
-    print(f"Archivo analizado: {metrics['filepath']}")
-    print(f"Líneas Totales: {metrics['total_lines']} | Líneas de Código (LOC): {metrics['code_loc']}")
-    print(f"Complejidad Ciclomática Promedio: {metrics['avg_cyclomatic_complexity']}")
-    print(f"Complejidad Cognitiva Promedio: {metrics['avg_cognitive_complexity']}")
+    print(f"Analysed file: {metrics['filepath']}")
+    print(f"Total lines: {metrics['total_lines']} | Lines of code (LOC): {metrics['code_loc']}")
+    print(f"Average cyclomatic complexity: {metrics['avg_cyclomatic_complexity']}")
+    print(f"Average cognitive complexity: {metrics['avg_cognitive_complexity']}")
 
-    # Construcción de diagrama de clases y jerarquía de herencia en sintaxis Mermaid.js.
-    print_header("Demostración 2: Generación de Diagrama Mermaid.js")
+    # Class diagram and inheritance hierarchy in Mermaid.js syntax.
+    print_header("Demo 2: Mermaid.js diagram")
 
     diagram = ArchitectureDiagramGenerator.generate_mermaid_diagram(sample_file)
-    print("Diagrama de Clases Mermaid.js:")
+    print("Mermaid.js class diagram:")
     print("-" * 50)
     print(diagram)
     print("-" * 50)
 
-    # Evaluación de principios SOLID, fiabilidad y síntesis de recomendaciones de refactorización.
-    print_header("Demostración 3: Auditoría SOLID y Recomendaciones")
+    # SOLID and reliability audit, then the refactoring plan built from all findings.
+    print_header("Demo 3: SOLID audit and recommendations")
 
     solid_findings = SOLIDChecker.audit_file(sample_file)
     for line, principle, level, msg in solid_findings:
-        print(f"Línea {line} [{principle}] [{level}]: {msg}")
+        print(f"Line {line} [{principle}] [{level}]: {msg}")
 
     for line, cat, level, msg in metrics.get("performance_findings", []):
-        print(f"Línea {line} [{cat}] [{level}]: {msg}")
+        print(f"Line {line} [{cat}] [{level}]: {msg}")
 
     recs = RefactorSuggester.generate_recommendations(metrics, solid_findings)
-    print("\nPlan de Refactorización Recomendado:")
+    print("\nRecommended refactoring plan:")
     for idx, rec in enumerate(recs, 1):
         print(f"  {idx}. {rec}")
 
     print("\n" + "=" * 65)
-    print(" Agente de Refactorización ejecutado exitosamente.")
+    print(" Refactoring agent finished successfully.")
     print("=" * 65 + "\n")
 
 if __name__ == "__main__":

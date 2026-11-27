@@ -1,16 +1,16 @@
 """
-Nombres de regla y categoría de cada hallazgo.
+Rule names and category of each finding.
 
-Los hallazgos llevan un `rule_id` amplio (SAST-MEDIO, SOLID-GUARD, SECRET...) que forma parte de
-la huella de la línea base y no conviene cambiar. Este módulo les da además:
+Findings carry a coarse `rule_id` (SAST-MEDIUM, SOLID-GUARD, SECRET...) that is part of the
+baseline fingerprint, so it should stay stable. On top of that, this module provides:
 
-- **nombres de regla**: con qué palabras se puede referir a un hallazgo, por ejemplo para
-  silenciarlo en su línea. Son su `rule_id` y sus prefijos (SAST, SOLID), su regla concreta
-  (shell, docstring...) y el `ruleId` del informe SARIF (SAST-SHELL), que es el que se ve en
-  GitHub Code Scanning;
-- **categoría**: `security` si es un riesgo de seguridad y `quality` si es de calidad del código
-  (fiabilidad, mantenibilidad o rendimiento). Sirve para que un aviso de seguridad no quede
-  escondido entre docstrings que faltan.
+- **rule names**: the words that can refer to a finding, for example to suppress it on its
+  own line. They are its `rule_id` and that id's prefixes (SAST, SOLID), its specific rule
+  (shell, docstring...) and the `ruleId` used in the SARIF report (SAST-SHELL), which is what
+  GitHub Code Scanning displays;
+- **category**: `security` for a security risk and `quality` for a code-quality issue
+  (reliability, maintainability or performance). It keeps a security warning from getting
+  lost among missing docstrings.
 """
 from __future__ import annotations
 
@@ -20,23 +20,23 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Set
 from .audits import topic
 from .findings import FindingLike, as_finding
 
-# Reglas del análisis estático que no tienen tema de fusión (ver audits._TOPICS), reconocidas
-# por su mensaje.
+# Static-analysis rules that have no merge topic (see audits._TOPICS), recognised by their
+# message. The messages come from quality.static_checker and refactor.solid_checker.
 _MESSAGE_RULES = [
-    ("docstring", re.compile(r"carece de docstring", re.I)),
-    ("too-many-args", re.compile(r"recibe \d+ argumentos", re.I)),
-    ("open-without-with", re.compile(r"fuera de un context manager", re.I)),
+    ("docstring", re.compile(r"has no docstring", re.I)),
+    ("too-many-args", re.compile(r"takes \d+ arguments", re.I)),
+    ("open-without-with", re.compile(r"outside a 'with' context manager", re.I)),
     ("toctou", re.compile(r"TOCTOU")),
-    ("path-traversal", re.compile(r"Path Traversal", re.I)),
-    ("no-timeout", re.compile(r"sin 'timeout'", re.I)),
+    ("path-traversal", re.compile(r"path traversal", re.I)),
+    ("no-timeout", re.compile(r"without an explicit 'timeout'", re.I)),
     ("tls-verify", re.compile(r"verify=False")),
     ("jinja", re.compile(r"Jinja", re.I)),
-    ("insecure-random", re.compile(r"m[oó]dulo 'random'", re.I)),
-    ("hardcoded-secret", re.compile(r"Posible secreto hardcodeado", re.I)),
-    ("shell", re.compile(r"Ejecuci[oó]n insegura de comandos con 'os\.", re.I)),
-    ("global-state", re.compile(r"estado mutable global", re.I)),
-    ("too-many-branches", re.compile(r"\[OCP\].*bifurcaciones", re.I)),
-    ("syntax-error", re.compile(r"^Error de sintaxis|^Error durante el an[aá]lisis", re.I)),
+    ("insecure-random", re.compile(r"'random' module", re.I)),
+    ("hardcoded-secret", re.compile(r"Possible hardcoded secret", re.I)),
+    ("shell", re.compile(r"Unsafe command execution with 'os\.", re.I)),
+    ("global-state", re.compile(r"global mutable state", re.I)),
+    ("too-many-branches", re.compile(r"\[OCP\].*branches", re.I)),
+    ("syntax-error", re.compile(r"^Syntax error|^Error during analysis", re.I)),
 ]
 
 RULE_NAMES: FrozenSet[str] = frozenset(
@@ -47,15 +47,15 @@ RULE_NAMES: FrozenSet[str] = frozenset(
 
 SECURITY = "security"
 QUALITY = "quality"
-CATEGORY_LABELS: Dict[str, str] = {SECURITY: "Seguridad", QUALITY: "Calidad del código"}
+CATEGORY_LABELS: Dict[str, str] = {SECURITY: "Security", QUALITY: "Code quality"}
 
-# Reglas del análisis estático que son de calidad y no de seguridad.
+# Static-analysis rules that are about code quality rather than security.
 _QUALITY_RULES = frozenset({
     "docstring", "too-many-args", "mutable-default", "open-without-with", "broad-except", "bare-except",
     "exception-swallow", "blocking-async", "global-state", "too-many-branches", "syntax-error",
 })
-# rule_id (o su prefijo) de los agentes de calidad. Todo lo demás (secretos, infraestructura,
-# dependencias, vulnerabilidades, cabeceras HTTP, logs) es de seguridad.
+# rule_id values (or prefixes) emitted by the quality-oriented agents. Everything else (secrets,
+# infrastructure, dependencies, vulnerabilities, HTTP headers, logs) counts as security.
 _QUALITY_RULE_IDS = ("SOLID", "PERF", "METRICS", "TEST-QUALITY", "TESTABILITY", "YAML")
 
 
@@ -65,7 +65,7 @@ def _prefixes(rule_id: str) -> Set[str]:
 
 
 def rule_names(item: FindingLike) -> Set[str]:
-    """Nombres con los que se puede referir a un hallazgo, en minúsculas."""
+    """Every lowercase name that can be used to refer to a finding."""
     from .reporting import _sarif_rule_id
 
     finding = as_finding(item)
@@ -78,7 +78,7 @@ def rule_names(item: FindingLike) -> Set[str]:
 
 
 def category(item: FindingLike) -> str:
-    """`security` o `quality`. Lo que no se reconoce como calidad cuenta como seguridad."""
+    """`security` or `quality`. Anything not recognised as quality counts as security."""
     finding = as_finding(item)
     rule_id = finding.rule_id.upper()
     if any(rule_id == prefix or rule_id.startswith(prefix + "-") for prefix in _QUALITY_RULE_IDS):
@@ -90,7 +90,7 @@ def category(item: FindingLike) -> str:
 
 
 def annotate(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Añade la clave `category` a cada hallazgo en forma de diccionario. Devuelve la misma lista."""
+    """Add a `category` key to each finding dict in place. Returns the same list."""
     for item in items:
         item["category"] = category(item)
     return items

@@ -1,1 +1,1 @@
-"""Agente hardening: endurecimiento de Nginx, Caddy, Docker, Kubernetes y systemd."""
+"""Hardening agent: hardened Nginx, Caddy, Docker, Kubernetes and systemd configuration."""

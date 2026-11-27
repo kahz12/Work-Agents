@@ -1,5 +1,5 @@
 """
-Constantes compartidas, manejo de errores y utilidades de ruta/salida del CLI.
+Constants, error handling and path/output helpers shared by the CLI commands.
 """
 from __future__ import annotations
 
@@ -13,64 +13,64 @@ from ..common.findings import Finding, FindingLike, as_finding, count_by_level
 T = TypeVar("T", bound=FindingLike)
 
 AGENTS = {
-    "defensive": ("agentes.defensive", "Seguridad defensiva (XSS, hashing, CSRF, RBAC)"),
-    "quality": ("agentes.quality", "Calidad de código y SAST / SARIF"),
-    "hardening": ("agentes.hardening", "Hardening Nginx/Caddy/Docker/K8s/systemd"),
-    "refactor": ("agentes.refactor", "Métricas, SOLID y diagramas Mermaid"),
-    "qa": ("agentes.qa", "Generación de tests, runner y contratos API"),
-    "sre": ("agentes.sre", "Logs, anomalías, health, Prometheus, alertas"),
+    "defensive": ("agentes.defensive", "Defensive security (XSS, hashing, CSRF, RBAC)"),
+    "quality": ("agentes.quality", "Code quality and SAST / SARIF"),
+    "hardening": ("agentes.hardening", "Nginx/Caddy/Docker/K8s/systemd hardening"),
+    "refactor": ("agentes.refactor", "Metrics, SOLID and Mermaid diagrams"),
+    "qa": ("agentes.qa", "Test generation, test runner and API contracts"),
+    "sre": ("agentes.sre", "Logs, anomalies, health, Prometheus, alerting"),
     "devops": ("agentes.devops", "GitHub Actions, GitLab CI, Compose, Helm"),
-    "docs": ("agentes.docs", "OpenAPI, Swagger UI y docs Markdown"),
+    "docs": ("agentes.docs", "OpenAPI, Swagger UI and Markdown docs"),
 }
 
-# Fuente única del resumen de comandos: alimenta la pantalla inicial y la ayuda de cada uno.
+# Single source for the command summaries: it feeds both the overview screen and each command's help.
 COMMAND_GROUPS: List[Tuple[str, List[Tuple[str, str, str]]]] = [
-    ("Analizar un proyecto", [
-        ("pipeline", "RUTA", "Auditoría completa: SAST, secretos, métricas, OpenAPI e infraestructura"),
-        ("analyze", "RUTA", "Solo análisis estático de Python, infraestructura y dependencias"),
-        ("secrets", "RUTA", "Busca claves y contraseñas en código y configuración"),
-        ("vulns", "RUTA", "Vulnerabilidades conocidas en las dependencias (consulta OSV)"),
-        ("audit", "RUTA|URL", "Audita un Dockerfile, YAML, .env, log, suite de tests o las cabeceras de una URL"),
-        ("metrics", "RUTA", "Complejidad, SOLID, rendimiento y recomendaciones de refactor"),
+    ("Analyse a project", [
+        ("pipeline", "PATH", "Full audit: SAST, secrets, metrics, OpenAPI and infrastructure"),
+        ("analyze", "PATH", "Python static analysis, infrastructure and dependencies only"),
+        ("secrets", "PATH", "Look for keys and passwords in code and configuration"),
+        ("vulns", "PATH", "Known vulnerabilities in dependencies (queries OSV)"),
+        ("audit", "PATH|URL", "Audit a Dockerfile, YAML, .env, log, test suite or a URL's headers"),
+        ("metrics", "PATH", "Complexity, SOLID, performance and refactoring advice"),
     ]),
-    ("Generar y corregir", [
-        ("generate", "TIPO", "Genera configuraciones endurecidas, documentación, diagramas y tests"),
-        ("fix", "ARCHIVO", "Fija un requirements.txt a las últimas versiones publicadas y revisa sus vulnerabilidades"),
+    ("Generate and fix", [
+        ("generate", "KIND", "Generate hardened configurations, documentation, diagrams and tests"),
+        ("fix", "FILE", "Pin a requirements.txt to the latest published versions and check them for vulnerabilities"),
     ]),
-    ("Probar", [
-        ("test", "ARCHIVO", "Ejecuta una suite unittest y evalúa su calidad y cobertura"),
-        ("testability", "ARCHIVO", "Detecta qué dificulta probar un módulo y propone escenarios"),
-        ("contract", "URL", "Valida estado, esquema y tiempo de respuesta de un endpoint"),
+    ("Test", [
+        ("test", "FILE", "Run a unittest suite and assess its quality and coverage"),
+        ("testability", "FILE", "Find what makes a module hard to test and suggest scenarios"),
+        ("contract", "URL", "Check an endpoint's status code, schema and response time"),
     ]),
-    ("Operar", [
-        ("health", "", "Comprueba disco, carga y, si lo pides, un puerto TCP o una URL"),
-        ("sla", "", "Evalúa una tasa de errores frente a un umbral"),
-        ("serve", "", "Servidor HTTP con /metrics (Prometheus) y /healthz"),
+    ("Operate", [
+        ("health", "", "Check disk and load, plus a TCP port or a URL on request"),
+        ("sla", "", "Compare an error rate against a threshold"),
+        ("serve", "", "HTTP server exposing /metrics (Prometheus) and /healthz"),
     ]),
-    ("Utilidades", [
-        ("password", "ACCIÓN", "Evalúa, cifra o verifica una contraseña"),
-        ("demo", "AGENTE", "Ejecuta la demo de un agente con datos de ejemplo"),
-        ("list", "", "Lista los 8 agentes"),
-        ("doctor", "", "Revisa la instalación y las dependencias opcionales"),
-        ("help", "[COMANDO]", "Muestra la ayuda general o la de un comando"),
+    ("Utilities", [
+        ("password", "ACTION", "Assess, hash or verify a password"),
+        ("demo", "AGENT", "Run an agent's demo on sample data"),
+        ("list", "", "List the 8 agents"),
+        ("doctor", "", "Check the installation and the optional dependencies"),
+        ("help", "[COMMAND]", "Show the general help or a command's help"),
     ]),
 ]
 COMMAND_ALIASES = {"serve-sre": "serve"}
 COMMAND_NAMES = [name for _, cmds in COMMAND_GROUPS for name, _, _ in cmds]
 
 STAGE_LABELS = dict((
-    ("quality_sast", "Análisis estático"),
-    ("defensive_secrets", "Secretos"),
-    ("refactor_metrics", "Métricas y SOLID"),
-    ("documentation", "Documentación OpenAPI"),
-    ("infra_and_deps", "Infraestructura y dependencias"),
-    ("dependency_vulns", "Vulnerabilidades en dependencias"),
+    ("quality_sast", "Static analysis"),
+    ("defensive_secrets", "Secrets"),
+    ("refactor_metrics", "Metrics and SOLID"),
+    ("documentation", "OpenAPI documentation"),
+    ("infra_and_deps", "Infrastructure and dependencies"),
+    ("dependency_vulns", "Dependency vulnerabilities"),
 ))
-STATUS_LABELS = {"ok": ("OK", "green"), "fail": ("FALLO", "red"), "skipped": ("OMITIDA", "yellow")}
+STATUS_LABELS = {"ok": ("OK", "green"), "fail": ("FAILED", "red"), "skipped": ("SKIPPED", "yellow")}
 
 
 class CliError(Exception):
-    """Error de uso: se muestra sin traza y termina con código 2."""
+    """A usage error: printed without a traceback, and the command exits with code 2."""
 
     def __init__(self, message: str, hint: Optional[str] = None) -> None:
         super().__init__(message)
@@ -78,31 +78,32 @@ class CliError(Exception):
         self.hint = hint
 
 
-# Raíz del proyecto que analiza el comando en curso. Si un archivo queda lejos del directorio
-# actual pero dentro de esa raíz, se muestra relativo a ella: src/app/x.py en vez de la ruta entera.
+# Root of the project the running command analyses. A file far from the current directory but
+# inside that root is shown relative to it: src/app/x.py instead of the full absolute path.
+# A ContextVar keeps concurrent or nested main() calls (tests, embedding) from leaking roots.
 _DISPLAY_ROOT_VAR: ContextVar[Optional[str]] = ContextVar("agentes_display_root", default=None)
 
 
 def reset_display_root() -> Token:
-    """Reinicia la raíz de visualización para la invocación actual y devuelve su token."""
+    """Clear the display root for the current invocation and return the token that restores it."""
     return _DISPLAY_ROOT_VAR.set(None)
 
 
 def restore_display_root(token: Token) -> None:
-    """Restaura la raíz de visualización previa tras finalizar el comando."""
+    """Restore the previous display root once the command has finished."""
     _DISPLAY_ROOT_VAR.reset(token)
 
 
 def set_display_root(full: str) -> None:
-    """Establece la raíz del proyecto analizado si aún no se fijó en este contexto."""
+    """Record the analysed project's root, unless one was already set in this context."""
     if _DISPLAY_ROOT_VAR.get() is None:
         _DISPLAY_ROOT_VAR.set(full if os.path.isdir(full) else os.path.dirname(full))
 
 
 def rel(path: Any) -> str:
     """
-    Ruta para mostrar: relativa al directorio actual si queda cerca; si no, relativa al
-    proyecto analizado; si no está en ninguno de los dos, absoluta.
+    A path for display: relative to the current directory when it is close by, otherwise
+    relative to the analysed project, otherwise absolute.
     """
     text = str(path)
     if not text or "://" in text:
@@ -113,7 +114,7 @@ def rel(path: Any) -> str:
         relative = os.path.relpath(text)
     except ValueError:
         return text
-    # Hasta dos niveles hacia arriba sigue siendo más legible que la ruta absoluta.
+    # Up to two levels up is still easier to read than the absolute path.
     if relative.split(os.sep).count("..") <= 2:
         return relative
     root = _DISPLAY_ROOT_VAR.get()
@@ -123,32 +124,32 @@ def rel(path: Any) -> str:
 
 
 def require_path(path: str, kind: str = "any") -> str:
-    """Valida que la ruta exista y coincida con el tipo esperado ('any', 'file' o 'dir')."""
+    """Check that the path exists and is of the expected kind ('any', 'file' or 'dir'); return it absolute."""
     full = os.path.abspath(os.path.expanduser(path))
     if os.path.exists(full):
         set_display_root(full)
     if not os.path.exists(full):
         raise CliError(
-            f"No existe la ruta: {path}",
-            "Revisa que esté bien escrita. Las rutas son relativas al directorio actual.",
+            f"Path does not exist: {path}",
+            "Check the spelling. Relative paths are resolved from the current directory.",
         )
     if kind == "file" and not os.path.isfile(full):
-        raise CliError(f"Se esperaba un archivo y '{path}' es un directorio.")
+        raise CliError(f"Expected a file, but '{path}' is a directory.")
     if kind == "dir" and not os.path.isdir(full):
-        raise CliError(f"Se esperaba un directorio y '{path}' es un archivo.")
+        raise CliError(f"Expected a directory, but '{path}' is a file.")
     return full
 
 
 def require_python_file(path: str) -> str:
-    """Valida que la ruta corresponda a un archivo .py existente."""
+    """Check that the path is an existing .py file; return it absolute."""
     full = require_path(path, "file")
     if not full.endswith(".py"):
-        raise CliError(f"Se esperaba un archivo .py: {path}")
+        raise CliError(f"Expected a .py file: {path}")
     return full
 
 
 def visible(findings: Sequence[FindingLike]) -> List[Finding]:
-    """Copia para mostrar: rutas relativas y sin entradas puramente informativas."""
+    """Display copy of the findings: relative paths, purely informational entries removed."""
     shown = []
     for item in findings:
         f = as_finding(item)
@@ -158,26 +159,26 @@ def visible(findings: Sequence[FindingLike]) -> List[Finding]:
 
 
 def dicts(findings: List[Finding]) -> List[Dict[str, Any]]:
-    """Convierte una lista de Finding en diccionarios serializables, con su categoría."""
+    """Convert Finding objects into JSON-serialisable dicts that include their category."""
     from ..common.rules import annotate
 
     return annotate([f.to_dict() for f in findings])
 
 
 def emit_json(data: Any) -> None:
-    """Serializa e imprime una estructura en formato JSON legible."""
+    """Print data as indented JSON."""
     import json
 
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
-def show_findings(findings: Sequence[FindingLike], limit: int, empty: str = "Sin hallazgos.", *,
+def show_findings(findings: Sequence[FindingLike], limit: int, empty: str = "No findings.", *,
                   security_checked: bool = False) -> None:
     """
-    Muestra los hallazgos visibles en consola, separados en seguridad y calidad del código para
-    que un riesgo de seguridad no quede entre docstrings que faltan, o un mensaje de éxito si no
-    hay ninguno. El límite se aplica a cada sección. security_checked indica que el comando
-    busca problemas de seguridad: si no encontró ninguno, se dice de forma explícita.
+    Print the visible findings split into security and code quality, so a security risk is not
+    buried among missing docstrings, or a success message when there are none. The limit applies
+    to each section separately. security_checked means the command looks for security problems:
+    when it found none, that is stated explicitly.
     """
     from ..common.rules import CATEGORY_LABELS, QUALITY, SECURITY, category
 
@@ -188,7 +189,7 @@ def show_findings(findings: Sequence[FindingLike], limit: int, empty: str = "Sin
     groups = {SECURITY: [f for f in shown if category(f) == SECURITY], QUALITY: [f for f in shown if category(f) == QUALITY]}
     if security_checked and not groups[SECURITY]:
         ui.out()
-        ui.ok("Ningún hallazgo de seguridad.")
+        ui.ok("No security findings.")
     for key in (SECURITY, QUALITY):
         group = groups[key]
         if group:
@@ -197,7 +198,7 @@ def show_findings(findings: Sequence[FindingLike], limit: int, empty: str = "Sin
 
 
 def drop_inline(findings: List[T]) -> Tuple[List[T], int]:
-    """Quita los hallazgos silenciados en su línea. Devuelve (los demás, cuántos se quitaron)."""
+    """Drop findings suppressed on their own line. Returns (remaining findings, number dropped)."""
     from ..common.suppressions import InlineSuppressions
 
     inline = InlineSuppressions()
@@ -206,27 +207,27 @@ def drop_inline(findings: List[T]) -> Tuple[List[T], int]:
 
 
 def show_inline_note(count: int) -> None:
-    """Avisa de cuántos hallazgos se silenciaron en su línea: callarlos no debe pasar desapercibido."""
+    """Say how many findings were suppressed inline: silencing them must never go unnoticed."""
     if count:
-        ui.hint(f"{count} hallazgos silenciados en su línea (# agentes: ignore, noqa o nosec) no se muestran.")
+        ui.hint(f"{count} findings suppressed inline (# agentes: ignore, noqa or nosec) are not shown.")
 
 
 def guard_overwrite(path: str, force: bool) -> None:
-    """Evita sobrescribir un archivo existente salvo que se indique --force."""
+    """Refuse to overwrite an existing file unless --force was given."""
     if os.path.exists(path) and not force:
         raise CliError(
-            f"Ya existe {rel(path)} y no se ha sobrescrito.",
-            "Añade --force para reemplazarlo o usa -o para elegir otra ruta.",
+            f"{rel(path)} already exists and was not overwritten.",
+            "Add --force to replace it, or use -o to choose another path.",
         )
 
 
 def ensure_parent(path: str) -> None:
-    """Crea el directorio padre de la ruta de salida si aún no existe."""
+    """Create the parent directory of an output path if it does not exist yet."""
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
 
 
 def python_files(target: str) -> List[str]:
-    """Lista los archivos Python bajo el archivo o directorio objetivo."""
+    """Python files under the target file or directory."""
     from ..common.orchestrator import _iter_python_files
 
     return _iter_python_files(target)

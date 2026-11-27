@@ -1,14 +1,14 @@
 """
-Vulnerabilidades conocidas en dependencias, consultadas en OSV (https://osv.dev).
+Known vulnerabilities in dependencies, looked up in OSV (https://osv.dev).
 
-OSV agrega los avisos de GitHub (GHSA), PyPI (PYSEC), npm y otros. Se comprueban las
-dependencias con versión exacta de los manifiestos y, sobre todo, los paquetes instalados
-en el entorno virtual del proyecto: con un rango no se sabe qué versión se instala, pero
-lo instalado es lo que se ejecuta. Si una restricción declarada (por ejemplo `<13`) impide
-instalar la versión corregida, se indica.
+OSV aggregates advisories from GitHub (GHSA), PyPI (PYSEC), npm and others. The dependencies
+checked are those pinned to an exact version in the manifests and, above all, the packages
+installed in the project's virtual environment: a range does not say which version gets
+installed, whereas what is installed is what actually runs. When a declared constraint
+(for example `<13`) prevents installing the fixed version, that is reported too.
 
-Envía a api.osv.dev el nombre y la versión de cada dependencia, nada más. Con
-AGENTES_OFFLINE=1 no se hace ninguna consulta.
+Only each dependency's name and version are sent to api.osv.dev. With AGENTES_OFFLINE=1 no
+request is made at all.
 """
 from __future__ import annotations
 
@@ -32,16 +32,17 @@ OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 _BATCH_SIZE = 500
 
-_GHSA_LEVELS = {"CRITICAL": "CRITICO", "HIGH": "ALTO", "MODERATE": "MEDIO", "MEDIUM": "MEDIO", "LOW": "BAJO"}
+# GitHub advisory severities mapped onto SEVERITY_ORDER ("MODERATE" is GHSA's word for medium).
+_GHSA_LEVELS = {"CRITICAL": "CRITICAL", "HIGH": "HIGH", "MODERATE": "MEDIUM", "MEDIUM": "MEDIUM", "LOW": "LOW"}
 
 
 class VulnDBUnavailable(RuntimeError):
-    """No se pudo consultar OSV."""
+    """OSV could not be queried."""
 
 
 @dataclass(frozen=True)
 class Dependency:
-    ecosystem: str          # "PyPI" o "npm"
+    ecosystem: str          # "PyPI" or "npm"
     name: str
     version: str
     file: str = ""
@@ -71,9 +72,9 @@ def _norm(ecosystem: str, name: str) -> str:
     return canonicalize_name(base) if ecosystem == "PyPI" else base.lower()
 
 
-# --- Lectura de manifiestos ---------------------------------------------------
+# --- Reading manifests --------------------------------------------------------
 
-# Restricción declarada sobre un paquete: (nombre normalizado, especificador, archivo).
+# A constraint declared on a package: (normalised name, specifier, file).
 Constraint = Tuple[str, str, str]
 
 
@@ -85,7 +86,7 @@ def _parse_requirement(text: str) -> Optional[Requirement]:
 
 
 def _exact_pin(req: Requirement) -> Optional[str]:
-    """La versión si el requisito la fija exactamente (`==1.2.3`), o None."""
+    """The version when the requirement pins it exactly (`==1.2.3`), otherwise None."""
     specs = list(req.specifier)
     if len(specs) == 1 and specs[0].operator in ("==", "===") and "*" not in specs[0].version:
         return specs[0].version
@@ -113,13 +114,13 @@ def _load_toml(path: str) -> Dict:
         try:
             import tomli as tomllib  # type: ignore[no-redef]
         except ImportError as exc:
-            raise ValueError("para leer pyproject.toml en Python < 3.11 hace falta 'tomli'") from exc
+            raise ValueError("reading pyproject.toml on Python < 3.11 requires 'tomli'") from exc
     with open(path, "rb") as fh:
         return tomllib.load(fh)
 
 
 def _pyproject(path: str) -> "ManifestData":
-    """Dependencias de [project], sus extras, [dependency-groups] y Poetry."""
+    """Dependencies from [project], its extras, [dependency-groups] and Poetry. The project itself is skipped."""
     toml = _load_toml(path)
     project = toml.get("project") or {}
     own = canonicalize_name(str(project.get("name", ""))) if project.get("name") else None
@@ -171,7 +172,7 @@ def _package_lock(path: str) -> Tuple[List[Dependency], int]:
             continue
         name = info.get("name") or key.rsplit("node_modules/", 1)[-1]
         deps[(name, info["version"])] = Dependency("npm", name, info["version"], path)
-    if not deps:  # lockfileVersion 1: dependencias anidadas, sin la clave "packages"
+    if not deps:  # lockfileVersion 1: nested dependencies and no "packages" key
         stack = list((data.get("dependencies") or {}).items())
         while stack:
             name, info = stack.pop()
@@ -214,8 +215,8 @@ class ManifestData:
             self.deps.append(Dependency("PyPI", req.name, pinned, path, line))
         else:
             self.unpinned += 1
-        # Un pin exacto no es una restricción que "impida" corregir: el consejo es actualizarlo.
-        # Solo cuentan los rangos, que pueden dejar fuera la versión corregida (`<13`).
+        # An exact pin is not a constraint that "blocks" the fix: the advice there is simply to
+        # bump it. Only ranges count, since they can exclude the fixed version (`<13`).
         if str(req.specifier) and not pinned:
             self.constraints.append((canonicalize_name(req.name), str(req.specifier), path))
 
@@ -228,6 +229,7 @@ def _wrap(reader: Callable[[str], Tuple[List["Dependency"], int]]) -> Callable[[
 
 
 def manifest_reader(filename: str) -> Optional[Callable[[str], ManifestData]]:
+    """The reader for a manifest or lock file, chosen by file name, or None when it is not one."""
     low = filename.lower()
     if low.startswith("requirements") and low.endswith(".txt"):
         return _requirements
@@ -245,20 +247,20 @@ def manifest_reader(filename: str) -> Optional[Callable[[str], ManifestData]]:
 def read_manifest_data(path: str) -> ManifestData:
     reader = manifest_reader(os.path.basename(path))
     if reader is None:
-        raise ValueError(f"No es un manifiesto de dependencias conocido: {path}")
+        raise ValueError(f"Not a known dependency manifest: {path}")
     return reader(path)
 
 
 def read_manifest(path: str) -> Tuple[List["Dependency"], int]:
-    """(dependencias con versión exacta, número de dependencias sin versión exacta)."""
+    """(dependencies with an exact version, number of dependencies without one)."""
     data = read_manifest_data(path)
     return data.deps, data.unpinned
 
 
-# --- Entornos instalados ----------------------------------------------------------
+# --- Installed environments --------------------------------------------------------
 
 def find_environments(root: str) -> List[str]:
-    """Entornos virtuales del proyecto: la propia raíz o sus subcarpetas directas con pyvenv.cfg."""
+    """The project's virtual environments: the root itself or direct subdirectories that contain pyvenv.cfg."""
     if not os.path.isdir(root):
         return []
     candidates = [root] + [os.path.join(root, d) for d in sorted(os.listdir(root))]
@@ -266,7 +268,7 @@ def find_environments(root: str) -> List[str]:
 
 
 def installed_packages(env: str) -> List["Dependency"]:
-    """Paquetes instalados en un entorno virtual, con su versión exacta."""
+    """Packages installed in a virtual environment, with their exact versions. Covers POSIX and Windows layouts."""
     from importlib import metadata
 
     site_dirs = glob.glob(os.path.join(env, "lib", "python*", "site-packages"))
@@ -279,10 +281,10 @@ def installed_packages(env: str) -> List["Dependency"]:
     return list(deps.values())
 
 
-# --- Consulta a OSV -------------------------------------------------------------
+# --- Querying OSV ---------------------------------------------------------------
 
 def _fixed_version(vuln: Dict, dep: Dependency) -> Optional[str]:
-    """La menor versión corregida posterior a la instalada, para este paquete."""
+    """The lowest fixed version above the installed one, for this package."""
     fixes: List[str] = []
     for affected in vuln.get("affected") or []:
         pkg = affected.get("package") or {}
@@ -300,12 +302,12 @@ def _fixed_version(vuln: Dict, dep: Dependency) -> Optional[str]:
 
 def _level(vuln: Dict) -> str:
     sev = str((vuln.get("database_specific") or {}).get("severity", "")).upper()
-    # Sin severidad publicada se trata como alta: es una vulnerabilidad conocida.
-    return _GHSA_LEVELS.get(sev, "ALTO")
+    # An advisory without a published severity is treated as high: it is still a known vulnerability.
+    return _GHSA_LEVELS.get(sev, "HIGH")
 
 
 def _dedupe(vulns: Sequence[Dict]) -> List[Dict]:
-    """OSV devuelve el mismo fallo con varios identificadores (GHSA, PYSEC, CVE). Se deja uno."""
+    """OSV returns the same issue under several identifiers (GHSA, PYSEC, CVE). Keep one, preferring GHSA."""
     ordered = sorted(vulns, key=lambda v: (not v.get("id", "").startswith("GHSA-"), v.get("id", "")))
     seen: set = set()
     unique = []
@@ -327,10 +329,11 @@ def _post_json(url: str, payload: Dict, timeout: float) -> Dict:
 
 def query_osv(deps: Iterable[Dependency], *, timeout: float = 15.0) -> Dict[Tuple[str, str, str], List[Vulnerability]]:
     """
-    Vulnerabilidades de cada dependencia. VulnDBUnavailable si OSV no responde.
+    Vulnerabilities per dependency. Raises VulnDBUnavailable when OSV does not respond.
 
-    Primero una consulta por lotes (hasta 500 dependencias por petición) dice cuáles están
-    afectadas; después, solo para esas, una consulta individual trae los avisos completos.
+    A batch query (up to 500 dependencies per request) first tells which ones are affected;
+    then, for those only, an individual query fetches the full advisories, since the batch
+    endpoint returns only IDs.
     """
     unique = list({d.key: d for d in deps}.values())
     if not unique:
@@ -365,7 +368,7 @@ def query_osv(deps: Iterable[Dependency], *, timeout: float = 15.0) -> Dict[Tupl
 
 
 def _blocking_constraint(dep: "Dependency", fixed: Optional[str], constraints: Sequence[Constraint]) -> Optional[Constraint]:
-    """La restricción declarada que impide instalar la versión corregida, si la hay."""
+    """The declared constraint that prevents installing the fixed version, if any."""
     if not fixed or dep.ecosystem != "PyPI":
         return None
     name = canonicalize_name(dep.name)
@@ -386,19 +389,20 @@ def to_findings(
     constraints: Sequence[Constraint] = (),
     root: str = "",
 ) -> List[Finding]:
+    """One finding per (dependency, vulnerability), naming the fix and any constraint that blocks it."""
     findings = []
     for dep in deps:
         for vuln in results.get(dep.key, []):
-            fix = f" Corregido en {vuln.fixed}." if vuln.fixed else " Sin versión corregida publicada."
+            fix = f" Fixed in {vuln.fixed}." if vuln.fixed else " No fixed version published."
             summary = f": {vuln.summary}" if vuln.summary else ""
             where = ""
             if dep.line == 0 and os.path.isfile(os.path.join(dep.file, "pyvenv.cfg")):
-                where = f" (instalado en {os.path.relpath(dep.file, root) if root else dep.file})"
+                where = f" (installed in {os.path.relpath(dep.file, root) if root else dep.file})"
             blocking = _blocking_constraint(dep, vuln.fixed, constraints)
             note = ""
             if blocking:
                 origin = os.path.relpath(blocking[2], root) if root else blocking[2]
-                note = f" La restricción '{dep.name}{blocking[1]}' de {origin} impide instalar esa versión."
+                note = f" The constraint '{dep.name}{blocking[1]}' in {origin} prevents installing that version."
             findings.append(Finding(
                 dep.file, dep.line, vuln.level,
                 f"{dep.name} {dep.version}{where} — {vuln.display_id}{summary}.{fix}{note}",
@@ -411,24 +415,24 @@ def to_findings(
 class VulnScan:
     findings: List[Finding]
     manifests: List[str]
-    checked: int        # dependencias con versión exacta consultadas (manifiestos + entornos)
-    unpinned: int       # dependencias declaradas sin versión exacta
+    checked: int        # dependencies with an exact version that were queried (manifests + environments)
+    unpinned: int       # declared dependencies without an exact version
     error: Optional[str] = None
     environments: List[str] = field(default_factory=list)
-    installed: int = 0  # paquetes leídos de los entornos instalados
-    blocked_fixes: List[Tuple[str, str, str, str]] = field(default_factory=list)  # (paquete, restricción, archivo, corrección)
+    installed: int = 0  # packages read from the installed environments
+    blocked_fixes: List[Tuple[str, str, str, str]] = field(default_factory=list)  # (package, constraint, file, fixed version)
 
     @property
     def unchecked(self) -> bool:
-        """No se ha podido comprobar nada: decir "0 vulnerabilidades" sería engañoso."""
+        """Nothing could be checked, so reporting "0 vulnerabilities" would be misleading."""
         return self.error is None and self.checked == 0
 
 
 def scan(manifests: Sequence[str], *, environments: Sequence[str] = (), timeout: float = 15.0,
          root: str = "") -> VulnScan:
     """
-    Lee los manifiestos y los entornos instalados y consulta OSV. No lanza: un fallo de red
-    queda en .error. Las versiones instaladas son las más fiables: son las que se ejecutan.
+    Read the manifests and installed environments, then query OSV. Never raises: a network
+    failure ends up in .error and an unreadable manifest becomes an ERROR finding.
     """
     deps: List[Dependency] = []
     constraints: List[Constraint] = []
@@ -461,16 +465,16 @@ def scan(manifests: Sequence[str], *, environments: Sequence[str] = (), timeout:
     for dep in deps:
         for vuln in results.get(dep.key, []):
             c = _blocking_constraint(dep, vuln.fixed, constraints)
-            # Solo hay restricción que bloquee si existe una versión corregida (vuln.fixed).
+            # A constraint can only block a fix that exists, hence the vuln.fixed check.
             if c and vuln.fixed and (dep.name, c[1], c[2], vuln.fixed) not in blocked:
                 blocked.append((dep.name, c[1], c[2], vuln.fixed))
-    # Una restricción se informa una vez, con la mayor versión corregida que bloquea.
+    # Each constraint is reported once, with the highest fixed version it blocks.
     worst: Dict[Tuple[str, str, str], str] = {}
     for name, spec, file, fixed in blocked:
         key = (name, spec, file)
         if key not in worst or Version(fixed) > Version(worst[key]):
             worst[key] = fixed
-    findings.extend(Finding(path, 0, "ERROR", f"No se pudo leer: {msg}", "VULN-READ-ERROR") for path, msg in errors)
+    findings.extend(Finding(path, 0, "ERROR", f"Could not read: {msg}", "VULN-READ-ERROR") for path, msg in errors)
     return VulnScan(findings, list(manifests), len({d.key for d in deps}), unpinned,
                     environments=list(environments), installed=installed,
                     blocked_fixes=[(n, s, f, v) for (n, s, f), v in worst.items()])

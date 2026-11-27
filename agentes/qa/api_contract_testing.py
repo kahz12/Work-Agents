@@ -11,12 +11,14 @@ from ..common.schema import validate_typed_schema
 
 class APIContractTester:
     """
-    Probador de contratos de API e integración funcional.
-    Valida status HTTP, esquemas, headers y SLA; genera payloads adversarios.
+    API contract testing: checks HTTP status, response schema, headers and latency SLA, either
+    on a response you already have or by making the request; also generates adversarial
+    payloads for a schema.
     """
 
     @staticmethod
     def _nominal_for_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+        """A valid example payload for the schema, with one plain value per field."""
         out: Dict[str, Any] = {}
         for k, t in schema.items():
             if t is bool:
@@ -38,8 +40,8 @@ class APIContractTester:
     @staticmethod
     def generate_adversarial_payloads(schema: Dict[str, Any]) -> List[Tuple[str, Any]]:
         """
-        Genera payloads adversarios y de valores límite a partir de un esquema tipado
-        para verificar la resiliencia de validadores de contrato y parsers JSON.
+        Adversarial and boundary payloads derived from a typed schema, to check how robust
+        contract validators and JSON parsers are. Returns (case name, payload) pairs.
         """
         nominal = APIContractTester._nominal_for_schema(schema)
         zero_payload: Dict[str, Any] = {}
@@ -57,8 +59,8 @@ class APIContractTester:
                 zero_payload[k] = 0
                 neg_unicode_payload[k] = -1
                 extreme_payload[k] = 10**18
-                # En Python bool hereda de int, por lo que isinstance(True, int) es verdadero;
-                # este valor prueba que el validador excluya booleanos cuando espera enteros puros.
+                # bool is a subclass of int in Python, so isinstance(True, int) is true; this value
+                # checks that the validator rejects booleans where it expects a real integer.
                 bool_trap_payload[k] = True
             elif t is float:
                 zero_payload[k] = 0.0
@@ -112,16 +114,19 @@ class APIContractTester:
         expected_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
-        Valida una respuesta de API contra su contrato formal, headers y restricciones SLA.
+        Validate an API response against its contract: status code, latency SLA, expected
+        headers (substring match, case-insensitive names) and JSON schema.
+        Returns {"endpoint", "passed", "elapsed_ms", "assertions"}; each assertion is a
+        (check, "OK" | "FAILED", detail) tuple.
         """
         assertions = []
         passed = True
 
         if response_status == expected_status:
-            assertions.append(("Status Code", "OK", f"Código de estado {response_status} correcto."))
+            assertions.append(("Status Code", "OK", f"Status code {response_status} as expected."))
         else:
             passed = False
-            assertions.append(("Status Code", "FALLO", f"Se esperaba {expected_status}, se recibió {response_status}."))
+            assertions.append(("Status Code", "FAILED", f"Expected {expected_status}, got {response_status}."))
 
         if (
             isinstance(elapsed_ms, bool)
@@ -131,12 +136,12 @@ class APIContractTester:
             or elapsed_ms < 0
         ):
             passed = False
-            assertions.append(("SLA Latencia", "FALLO", f"Latencia inválida o fuera de dominio ({elapsed_ms})."))
+            assertions.append(("Latency SLA", "FAILED", f"Invalid or out-of-range latency ({elapsed_ms})."))
         elif elapsed_ms <= max_sla_ms:
-            assertions.append(("SLA Latencia", "OK", f"Tiempo de respuesta {elapsed_ms}ms dentro del límite SLA ({max_sla_ms}ms)."))
+            assertions.append(("Latency SLA", "OK", f"Response time {elapsed_ms}ms within the SLA limit ({max_sla_ms}ms)."))
         else:
             passed = False
-            assertions.append(("SLA Latencia", "FALLO", f"Tiempo de respuesta {elapsed_ms}ms excede SLA ({max_sla_ms}ms)."))
+            assertions.append(("Latency SLA", "FAILED", f"Response time {elapsed_ms}ms exceeds the SLA ({max_sla_ms}ms)."))
 
         if expected_headers:
             actual_hdrs = {str(k).lower(): str(v) for k, v in (response_headers or {}).items()}
@@ -144,15 +149,15 @@ class APIContractTester:
             for h_name, h_val in expected_headers.items():
                 actual_val = actual_hdrs.get(str(h_name).lower())
                 if actual_val is None:
-                    hdr_errors.append(f"Falta header requerido '{h_name}'")
+                    hdr_errors.append(f"Missing required header '{h_name}'")
                 elif str(h_val) not in actual_val:
-                    hdr_errors.append(f"Header '{h_name}' esperaba '{h_val}', recibió '{actual_val}'")
+                    hdr_errors.append(f"Header '{h_name}' expected '{h_val}', got '{actual_val}'")
             if hdr_errors:
                 passed = False
                 for herr in hdr_errors:
-                    assertions.append(("Headers HTTP", "FALLO", herr))
+                    assertions.append(("HTTP Headers", "FAILED", herr))
             else:
-                assertions.append(("Headers HTTP", "OK", "Headers HTTP esperados presentes."))
+                assertions.append(("HTTP Headers", "OK", "Expected HTTP headers are present."))
 
         if expected_schema:
             ok, errs = validate_typed_schema(
@@ -161,11 +166,11 @@ class APIContractTester:
                 reject_extra_keys=reject_extra_keys,
             )
             if ok:
-                assertions.append(("Esquema JSON", "OK", "La estructura de respuesta cumple el contrato especificado."))
+                assertions.append(("JSON Schema", "OK", "The response structure matches the contract."))
             else:
                 passed = False
                 for err in errs:
-                    assertions.append(("Esquema JSON", "FALLO", err))
+                    assertions.append(("JSON Schema", "FAILED", err))
 
         return {
             "endpoint": endpoint,
@@ -189,7 +194,10 @@ class APIContractTester:
         expected_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
-        Realiza una petición HTTP real y valida el contrato/SLA.
+        Make a real HTTP request and validate the response contract and SLA.
+
+        An HTTP error status is still a response and is validated like any other; only a
+        transport failure (no connection, timeout) short-circuits into a failed result.
         """
         req_headers = {"User-Agent": f"agentes-qa-contract/{__version__}", "Accept": "application/json"}
         if headers:
@@ -238,7 +246,7 @@ class APIContractTester:
                 "passed": False,
                 "elapsed_ms": elapsed_ms,
                 "error": str(exc),
-                "assertions": [("HTTP Request", "FALLO", f"No se pudo completar la petición: {exc}")],
+                "assertions": [("HTTP Request", "FAILED", f"The request could not be completed: {exc}")],
             }
 
         elapsed_ms = round((time.time() - start) * 1000, 2)

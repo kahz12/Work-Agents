@@ -14,54 +14,54 @@ def print_header(title: str):
     print("=" * 65)
 
 def main():
-    print_header("Agente de Fortalecimiento de Infraestructura")
-    print("Módulos Nginx/Caddy, Docker, Systemd y Kubernetes PodSecurity cargados.")
+    print_header("Infrastructure Hardening Agent")
+    print("Loaded modules: Nginx/Caddy, Docker, systemd and Kubernetes Pod Security.")
 
     current_dir = agent_output_dir(__file__)
 
-    # Generación de configuración TLS endurecida y cabeceras HTTP defensivas para Caddyfile.
-    print_header("Demostración 1: Generación de Nginx y Caddyfile Fortalecidos")
+    # Hardened TLS settings and HTTP security headers for a Caddyfile.
+    print_header("Demo 1: Hardened Nginx and Caddyfile")
 
-    caddy_conf = WebServerHardening.generate_caddy_config("midominio.com")
-    print("Muestra de Caddyfile generado:")
+    caddy_conf = WebServerHardening.generate_caddy_config("mydomain.com")
+    print("Generated Caddyfile:")
     print("-" * 50)
     print(caddy_conf.strip())
     print("-" * 50)
 
-    # Emisión de Dockerfile endurecido con usuario sin privilegios y superficie mínima.
-    print_header("Demostración 2: Generación y Auditoría de Contenedor Docker")
+    # Hardened Dockerfile: unprivileged user and a minimal runtime image.
+    print_header("Demo 2: Docker container generation and audit")
 
     dockerfile_path = os.path.join(current_dir, "Dockerfile.hardened")
     ContainerHardening.generate_hardened_dockerfile(dockerfile_path)
-    print(f"Dockerfile fortalecido generado en: {dockerfile_path}")
+    print(f"Hardened Dockerfile written to: {dockerfile_path}")
 
-    # Auditoría y generación de políticas PodSecurity de Kubernetes bajo principio de mínimo privilegio.
-    print_header("Demostración 3: Kubernetes PodSecurity Standards Audit")
+    # Kubernetes Pod Security: generate a least-privilege Pod, then audit an insecure one.
+    print_header("Demo 3: Kubernetes Pod Security Standards audit")
 
-    K8sHardening.generate_hardened_pod_manifest("mi-microservicio", "mi-imagen:1.2.0")
-    print("Manifiesto Kubernetes Pod SecurityContext generado exitosamente.")
+    K8sHardening.generate_hardened_pod_manifest("my-microservice", "my-image:1.2.0")
+    print("Kubernetes Pod manifest with a hardened securityContext generated.")
 
-    pod_inseguro = {
+    insecure_pod = {
         "apiVersion": "v1",
         "kind": "Pod",
         "spec": {
             "containers": [{"name": "app", "image": "nginx:latest"}]
         }
     }
-    print("\nAuditando manifiesto Pod Kubernetes inseguro...")
-    k8s_hallazgos = K8sHardening.audit_pod_security_context(pod_inseguro)
-    for elem, nivel, desc in k8s_hallazgos:
-        print(f"[{nivel}] Componente: {elem} -> {desc}")
+    print("\nAuditing an insecure Kubernetes Pod manifest...")
+    k8s_findings = K8sHardening.audit_pod_security_context(insecure_pod)
+    for elem, level, desc in k8s_findings:
+        print(f"[{level}] Element: {elem} -> {desc}")
 
-    # Emisión de unidad systemd con aislamiento de sistema de archivos, capacidades y espacios de nombres.
-    print_header("Demostración 4: Systemd Service Isolation Hardening")
+    # systemd unit with filesystem, capability and namespace isolation.
+    print_header("Demo 4: systemd service isolation hardening")
 
-    service_path = os.path.join(current_dir, "mi_aplicacion.service")
+    service_path = os.path.join(current_dir, "my_app.service")
     ServiceHardening.generate_hardened_service(service_path)
-    print(f"Unidad de servicio systemd aislada generada en: {service_path}")
+    print(f"Isolated systemd unit written to: {service_path}")
 
     print("\n" + "=" * 65)
-    print(" Agente de Fortalecimiento ejecutado exitosamente.")
+    print(" Hardening agent finished successfully.")
     print("=" * 65 + "\n")
 
 if __name__ == "__main__":

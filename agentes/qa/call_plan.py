@@ -1,18 +1,19 @@
 """
-Cómo llamar a cada función o método en los tests generados.
+How the generated tests call each function or method.
 
-Para cada objetivo decide qué argumentos pasar, de dónde sale cada valor de ejemplo, cómo se
-obtiene el objeto sobre el que se llama un método y cómo se importa el módulo. Los valores salen,
-de más a menos fiable, de:
+For every target it decides which arguments to pass, where each sample value comes from, how
+to obtain the object a method is called on, and how to import the module. Sample values come
+from, most reliable first:
 
-1. el valor por defecto del parámetro: no se pasa y la función usa el suyo;
-2. su anotación de tipo, incluidos los alias, las clases, los enums y los Literal del módulo;
-3. cómo lo usa el cuerpo de la función (se recorre, se le llama .lower(), se compara con 5...);
-4. su nombre (SAMPLE_BY_NAME y las reglas de sample_for_arg).
+1. the parameter's default value: the argument is omitted and the function uses its own;
+2. its type annotation, including the module's aliases, classes, enums and Literals;
+3. how the function body uses it (iterates it, calls .lower() on it, compares it with 5...);
+4. its name (SAMPLE_BY_NAME and the rules in sample_for_arg).
 
-Los valores de 3 y 4 son supuestos, salvo que coincidan con un nombre de la tabla. Un test con
-valores supuestos lo dice y, si no encajan con la función (TypeError o AttributeError), se omite
-en vez de fallar: no saber construir un buen ejemplo no es un fallo del código analizado.
+Values from 3 and 4 are assumptions unless they match a name in the table. A test built on
+assumed values says so and, when they do not fit the function (TypeError or AttributeError), it
+is skipped rather than failed: not knowing how to build a good sample is not a defect of the
+analysed code.
 """
 from __future__ import annotations
 
@@ -25,9 +26,9 @@ from .ast_inspector import FuncNode, _attr_chain, _name_of, body_nodes, method_k
 from .project import ProjectIndex, module_import
 from .sample_values import SAMPLE_BY_NAME, boundary_samples_for_param, sample_for_arg
 
-# --- Tipos y valores de ejemplo ----------------------------------------------------------------
+# --- Types and sample values ------------------------------------------------------------------
 
-# Valor de ejemplo de cada clase de valor que se sabe construir.
+# Sample expression for each value kind the generator knows how to build.
 KIND_SAMPLES: Dict[str, str] = {
     "int": "1", "float": "1.0", "number": "1", "str": '"sample"', "bytes": 'b"sample"',
     "bool": "True", "list": "[]", "dict": "{}", "set": "set()", "tuple": "()",
@@ -38,7 +39,7 @@ _BUILTIN_TYPES: Dict[str, str] = {
     "bytearray": "bytes", "bool": "bool", "list": "list", "dict": "dict", "set": "set",
     "frozenset": "set", "tuple": "tuple", "None": "none", "NoneType": "none",
 }
-# Tipos genéricos de typing y collections.abc, por su nombre sin módulo.
+# Generic types from typing and collections.abc, by their bare name.
 _GENERIC_TYPES: Dict[str, str] = {
     "List": "list", "Sequence": "list", "MutableSequence": "list", "Iterable": "list",
     "Collection": "list", "Reversible": "list", "Dict": "dict", "Mapping": "dict",
@@ -46,7 +47,7 @@ _GENERIC_TYPES: Dict[str, str] = {
     "FrozenSet": "set", "AbstractSet": "set", "MutableSet": "set", "Tuple": "tuple",
     "Callable": "callable", "Text": "str", "AnyStr": "str", "ByteString": "bytes",
 }
-# Tipos de la biblioteca estándar con un valor fijo: (módulo que importar, expresión).
+# Standard-library types with a fixed sample: (module to import, expression).
 _STDLIB_TYPES: Dict[str, Tuple[str, str]] = {
     "Path": ("pathlib", 'pathlib.Path("sample.txt")'),
     "PurePath": ("pathlib", 'pathlib.PurePath("sample.txt")'),
@@ -59,25 +60,25 @@ _STDLIB_TYPES: Dict[str, Tuple[str, str]] = {
     "timedelta": ("datetime", "datetime.timedelta(seconds=1)"),
     "Pattern": ("re", 're.compile("sample")'),
 }
-# Envoltorios que no cambian el tipo del valor.
+# Wrappers that do not change the type of the value.
 _TRANSPARENT = frozenset({"Optional", "Annotated", "Final", "ClassVar", "Required", "NotRequired", "ReadOnly"})
 _ANY_TYPES = frozenset({"Any", "object"})
 _ENUM_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"})
-# Frameworks de interfaz: los métodos de sus componentes necesitan la aplicación en marcha
-# (query_one de Textual falla sin una pantalla montada; un widget de Tk, sin ventana).
+# UI frameworks: methods of their components need the application running (Textual's
+# query_one fails without a mounted screen; a Tk widget fails without a window).
 _UI_FRAMEWORKS: Dict[str, str] = {
     "textual": "Textual", "tkinter": "Tkinter", "customtkinter": "CustomTkinter", "PyQt5": "Qt",
     "PyQt6": "Qt", "PySide2": "Qt", "PySide6": "Qt", "wx": "wxPython", "kivy": "Kivy", "kivymd": "KivyMD",
     "toga": "Toga",
 }
-# Clases de valor para las que hay valores límite.
+# Value kinds that have boundary values.
 _BOUNDARY_KINDS = frozenset({"int", "float", "number", "str", "bytes", "bool", "list", "dict"})
 
 
 class Sample(NamedTuple):
     """
-    Expresión de un valor de ejemplo, su clase de valor y si es un supuesto. En un contenedor
-    tipado, item es su elemento de ejemplo (k: v en un dict): con él se construyen sus valores límite.
+    A sample value expression, its value kind and whether it is an assumption. For a typed
+    container, item is its sample element (k: v for a dict), used to build its boundary values.
     """
 
     expr: str
@@ -88,10 +89,10 @@ class Sample(NamedTuple):
 
 class ClassModel(NamedTuple):
     """
-    Lo que hace falta saber de una clase del módulo para construirla y llamar a sus métodos.
-    params son los parámetros del constructor (los de __init__, o los campos de una dataclass o
-    NamedTuple); abstract_methods, los métodos abstractos que ni ella ni sus bases implementan;
-    ui, el framework de interfaz del que hereda (Textual, Qt...), o "" si no es un componente.
+    What the generator needs to know about a module class to construct it and call its methods.
+    params are the constructor parameters (from __init__, or the fields of a dataclass or
+    NamedTuple); abstract_methods, the abstract methods neither it nor its bases implement; ui,
+    the UI framework it inherits from (Textual, Qt...), or "" when it is not a UI component.
     """
 
     name: str
@@ -108,18 +109,17 @@ class ClassModel(NamedTuple):
 
     @property
     def abstract(self) -> bool:
-        """No se puede instanciar: es un Protocol o le quedan métodos abstractos sin implementar."""
+        """It cannot be instantiated: it is a Protocol or still has unimplemented abstract methods."""
         return self.protocol or bool(self.abstract_methods)
 
 
 class SampleContext:
     """
-    Lo que sabe el generador de un módulo: sus clases y sus alias de tipo. El del módulo analizado
-    es la raíz; con un ProjectIndex, las clases que importa de otros módulos del proyecto se
-    buscan en el contexto de su propio módulo (child), donde sus anotaciones tienen sentido.
-    Mientras se generan los tests, la raíz va anotando qué nombres del módulo analizado, de otros
-    módulos del proyecto y de la biblioteca estándar usan las expresiones, para que la suite los
-    importe.
+    What the generator knows about a module: its classes and its type aliases. The analysed
+    module's context is the root; with a ProjectIndex, classes it imports from other project
+    modules are looked up in their own module's context (child), where their annotations make
+    sense. While tests are generated, the root records which names from the analysed module,
+    other project modules and the standard library the expressions use, so the suite imports them.
     """
 
     def __init__(self, tree: Optional[ast.Module], project: Optional[ProjectIndex] = None, *,
@@ -150,7 +150,7 @@ class SampleContext:
 
     @property
     def used_names(self) -> Set[str]:
-        """Nombres que la suite importa del módulo analizado."""
+        """Names the suite imports from the analysed module."""
         return self.root._used_names
 
     @used_names.setter
@@ -159,7 +159,7 @@ class SampleContext:
 
     @property
     def used_modules(self) -> Set[str]:
-        """Módulos de la biblioteca estándar que usan los valores de ejemplo (pathlib, datetime...)."""
+        """Standard-library modules the sample values use (pathlib, datetime...)."""
         return self.root._used_modules
 
     @used_modules.setter
@@ -167,7 +167,7 @@ class SampleContext:
         self.root._used_modules = value
 
     def snapshot(self) -> Tuple[Set[str], Set[str], Dict[str, Set[str]]]:
-        """Lo anotado hasta ahora, para deshacer lo que anote un objetivo que al final se omite."""
+        """Snapshot of what has been recorded so far, to undo the names of a target that ends up skipped."""
         root = self.root
         return set(root._used_names), set(root._used_modules), {m: set(n) for m, n in root.foreign_imports.items()}
 
@@ -176,19 +176,19 @@ class SampleContext:
         root._used_names, root._used_modules, root.foreign_imports = snapshot
 
     def child(self, module: str) -> Optional["SampleContext"]:
-        """El contexto de otro módulo del proyecto, creado una vez; None si no se puede leer o se está creando."""
+        """Context of another project module, created once; None when it cannot be read or is being created."""
         root = self.root
         if module == root.module:
             return root
         if module not in root._children:
-            root._children[module] = None  # mientras se crea: un import circular no entra en bucle
+            root._children[module] = None  # placeholder while it is built, so a circular import cannot recurse
             tree = root.project.tree(module) if root.project else None
             if tree is not None:
                 root._children[module] = SampleContext(tree, root.project, module=module, root=root)
         return root._children[module]
 
     def lookup(self, name: str, depth: int = 0) -> Optional[Tuple["SampleContext", ClassModel]]:
-        """La clase que name nombra en este módulo, con el contexto de su módulo; None si no se conoce."""
+        """The class name refers to in this module, with its own module's context; None when unknown."""
         if name in self.classes:
             return self, self.classes[name]
         if name not in self.imported or depth > 4:
@@ -199,9 +199,10 @@ class SampleContext:
 
     def require(self, name: str) -> bool:
         """
-        Anota que la suite usa name, una clase de este módulo: del módulo analizado si es la raíz o
-        si el analizado la importa con ese nombre; si no, de este módulo. False si chocaría con
-        otro nombre que la suite ya usa (una clase homónima de otro módulo).
+        Record that the suite uses name, a class of this module: imported from the analysed module
+        when this is the root or the analysed module imports it under that name, otherwise from
+        this module. False when it would clash with a name the suite already uses (a class with
+        the same name from another module).
         """
         root = self.root
         if self is root or root.imported.get(name) == (self.module, name):
@@ -215,10 +216,10 @@ class SampleContext:
 
     def exception_import(self, name: str) -> Optional[str]:
         """
-        Qué hay que importar del módulo para nombrar en la suite una excepción que lanza el
-        código: su primer nombre ("binascii" para binascii.Error), "" si es de builtins y no hace
-        falta importar nada, o None si no existe a nivel de módulo (una variable local, self.error)
-        y el test no puede referirse a ella. Un nombre del módulo tapa al de builtins.
+        What the suite must import from the module to name an exception the code raises: its
+        first name ("binascii" for binascii.Error), "" for a builtin that needs no import, or None
+        when it does not exist at module level (a local variable, self.error) and the test cannot
+        refer to it. A module-level name shadows the builtin of the same name.
         """
         head = name.split(".", 1)[0]
         if head in self.module_names:
@@ -229,7 +230,7 @@ class SampleContext:
         return None
 
     def use_exception(self, name: str) -> bool:
-        """Anota lo que hay que importar para nombrar la excepción; False si la suite no puede nombrarla."""
+        """Record the import needed to name the exception; False when the suite cannot name it."""
         head = self.exception_import(name)
         if head is None:
             return False
@@ -239,15 +240,16 @@ class SampleContext:
 
     def _inherit(self) -> None:
         """
-        Lo que una clase toma de sus bases del módulo: el constructor, si es enum y lo abstracto
-        pendiente. Se repite hasta que nada cambia, para que llegue por toda la cadena de herencia.
+        Propagate what classes take from their module bases: the constructor, enum-ness and
+        outstanding abstract methods. Repeats until nothing changes, so it flows down the whole
+        inheritance chain.
         """
         for _ in range(len(self.classes)):
             if not self._inherit_step():
                 return
 
     def _inherit_step(self) -> bool:
-        """Una pasada de herencia por todas las clases; True si alguna cambió."""
+        """One inheritance pass over every class; True when any class changed."""
         changed = False
         for name, model in list(self.classes.items()):
             updated = model
@@ -256,8 +258,9 @@ class SampleContext:
                 if parent is not None and parent.name != name:
                     updated = _inherit_from(updated, parent)
                 elif parent is None and not updated.ui:
-                    # De una base de otro módulo del proyecto solo se hereda si es de interfaz: su
-                    # constructor tiene anotaciones con los nombres de aquel módulo.
+                    # From a base defined in another project module only the UI framework is
+                    # inherited. Its constructor is not copied: its annotations use names from
+                    # that other module, which do not resolve here.
                     found = self.lookup(base)
                     updated = updated._replace(ui=found[1].ui) if found is not None else updated
             if updated != model:
@@ -267,7 +270,7 @@ class SampleContext:
 
 
 def _inherit_from(model: ClassModel, parent: ClassModel) -> ClassModel:
-    """model con lo que hereda de parent: el constructor si no tiene uno propio, enum y lo abstracto que no implementa."""
+    """model plus what it inherits from parent: the constructor when it has none, enum-ness and the abstract methods it leaves unimplemented."""
     own_init = model.init is not None or bool(model.params)
     implemented = {m for m, kind in model.method_kinds.items() if kind != "abstract"}
     return model._replace(
@@ -281,7 +284,7 @@ def _inherit_from(model: ClassModel, parent: ClassModel) -> ClassModel:
     )
 
 
-# Módulos que la cabecera de la suite ya importa: no hace falta traerlos del módulo analizado.
+# Modules the suite header already imports; they never need importing from the analysed module.
 _HEADER_MODULES = frozenset({"os", "sys"})
 
 
@@ -292,9 +295,9 @@ def _assigned_names(node: ast.stmt) -> Set[str]:
 
 def module_bindings(stmts: Sequence[ast.stmt]) -> Set[str]:
     """
-    Nombres que existen seguro a nivel de módulo tras importarlo. De un if solo cuentan los que
-    definen sus dos ramas (if TYPE_CHECKING: no define nada en ejecución) y de un try, los que
-    quedan definidos tanto si termina bien como si salta cualquiera de sus except.
+    Names certainly bound at module level once the module is imported. From an if, only names
+    bound by both branches count (if TYPE_CHECKING: binds nothing at runtime); from a try, only
+    those bound whether it completes normally or any of its except handlers runs.
     """
     names: Set[str] = set()
     for node in stmts:
@@ -322,7 +325,7 @@ def _is_dataclass(node: ast.ClassDef) -> bool:
 
 
 def _field_params(node: ast.ClassDef) -> Tuple[List[ast.arg], Dict[str, ast.AST]]:
-    """Campos de una dataclass o NamedTuple, en orden, con sus valores por defecto."""
+    """Fields of a dataclass or NamedTuple, in order, with their default values."""
     params: List[ast.arg] = []
     defaults: Dict[str, ast.AST] = {}
     for item in node.body:
@@ -345,12 +348,12 @@ def _field_params(node: ast.ClassDef) -> Tuple[List[ast.arg], Dict[str, ast.AST]
 
 
 def _base_node(base: ast.AST) -> ast.AST:
-    """La clase de una base genérica: ModalScreen[bool] es ModalScreen."""
+    """The class behind a generic base: ModalScreen[bool] is ModalScreen."""
     return base.value if isinstance(base, ast.Subscript) else base
 
 
 def _ui_bindings(stmts: Sequence[ast.stmt]) -> Dict[str, str]:
-    """Nombres del módulo que vienen de un framework de interfaz: from textual.screen import Screen, import tkinter as tk."""
+    """Module names that come from a UI framework: from textual.screen import Screen, import tkinter as tk."""
     found: Dict[str, str] = {}
     for node in stmts:
         if isinstance(node, ast.ImportFrom) and not node.level and node.module:
@@ -395,7 +398,7 @@ def _root_name(annotation: ast.AST) -> str:
 
 
 def annotation_sample(annotation: Optional[ast.AST], ctx: SampleContext, depth: int = 0) -> Optional[Sample]:
-    """Valor de ejemplo para una anotación, o None si no se sabe construir un valor de ese tipo."""
+    """Sample value for an annotation, or None when no value of that type can be built."""
     if annotation is None or depth > 4:
         return None
     if isinstance(annotation, ast.Constant):
@@ -416,7 +419,7 @@ def annotation_sample(annotation: Optional[ast.AST], ctx: SampleContext, depth: 
 
 
 def _first_branch(branches: Sequence[ast.AST], ctx: SampleContext, depth: int) -> Optional[Sample]:
-    """Union o X | Y: el primer tipo que se sepa construir, con None al final."""
+    """Union or X | Y: the first member type that can be built, trying None last."""
     ordered = sorted(branches, key=lambda b: isinstance(b, ast.Constant) and b.value is None)
     for branch in ordered:
         sample = annotation_sample(branch, ctx, depth + 1)
@@ -426,7 +429,7 @@ def _first_branch(branches: Sequence[ast.AST], ctx: SampleContext, depth: int) -
 
 
 def _element_sample(annotation: ast.AST, ctx: SampleContext, depth: int) -> Optional[Sample]:
-    """Elemento de un contenedor. Any u object dentro de un contenedor admite cualquier valor."""
+    """Element of a container. Any or object as the element type accepts any value."""
     if _root_name(annotation) in _ANY_TYPES:
         return Sample('"sample"', "str", False)
     return annotation_sample(annotation, ctx, depth + 1)
@@ -434,8 +437,8 @@ def _element_sample(annotation: ast.AST, ctx: SampleContext, depth: int) -> Opti
 
 def _container_sample(kind: str, args: Sequence[ast.AST], ctx: SampleContext, depth: int) -> Optional[Sample]:
     """
-    Un contenedor con un elemento del tipo indicado. Si el elemento no se sabe construir, una
-    lista, un set o un dict vacíos siguen siendo válidos; una tupla de aridad fija, no.
+    A container holding one element of the given type. When the element cannot be built, an empty
+    list, set or dict is still valid; a fixed-arity tuple is not.
     """
     items = [_element_sample(a, ctx, depth) for a in args if not isinstance(a, ast.Constant)]
     if not items or any(item is None for item in items):
@@ -497,9 +500,9 @@ def _named_sample(name: str, ctx: SampleContext, depth: int) -> Optional[Sample]
 
 def construct_expr(class_name: str, ctx: SampleContext, depth: int = 0) -> Optional[str]:
     """
-    Expresión que crea un objeto de una clase del módulo o de otro módulo del proyecto, o None si
-    no se sabe (abstracta, tipos desconocidos, un nombre que chocaría con otro). Los parámetros de
-    una clase de otro módulo se resuelven en el contexto de ese módulo.
+    Expression that creates an instance of a class from this module or another project module, or
+    None when that is not possible (abstract, unknown parameter types, a clashing name). The
+    parameters of a class from another module are resolved in that module's context.
     """
     found = ctx.lookup(class_name)
     if found is None or found[1].abstract or depth > 4:
@@ -519,7 +522,7 @@ def construct_expr(class_name: str, ctx: SampleContext, depth: int = 0) -> Optio
     return f"{model.name}({', '.join(args)})" if owner.require(model.name) else None
 
 
-# --- Uso de los parámetros en el cuerpo ----------------------------------------------------------
+# --- How the body uses each parameter ------------------------------------------------------------
 
 _STR_METHODS = frozenset({
     "lower", "upper", "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines", "startswith",
@@ -541,7 +544,7 @@ _ORDERING = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 
 
 def _constant_kind(node: ast.AST) -> Optional[str]:
-    """Clase de valor de un literal, o de una tupla o lista de literales de la misma clase."""
+    """Value kind of a literal, or of a tuple or list of literals of the same kind."""
     if isinstance(node, ast.Constant) and not isinstance(node.value, bool) and node.value is not None:
         return {"int": "number", "float": "number", "str": "str", "bytes": "bytes"}.get(type(node.value).__name__)
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and node.elts:
@@ -590,8 +593,8 @@ def _votes_from_binop(node: ast.BinOp, votes: Dict[str, Set[str]]) -> None:
 
 def usage_kinds(func: FuncNode) -> Dict[str, Set[str]]:
     """
-    Clases de valor que sugiere el uso de cada parámetro en el cuerpo: iterable, indexed (se usa
-    con un índice entero), str, dict, list, set, bytes, number o callable.
+    Value kinds suggested by how the body uses each parameter: iterable, indexed (subscripted with
+    an integer), str, dict, list, set, bytes, number or callable.
     """
     args = func.args
     votes: Dict[str, Set[str]] = {a.arg: set() for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
@@ -614,12 +617,12 @@ def usage_kinds(func: FuncNode) -> Dict[str, Set[str]]:
 
 
 def _usage_sample(votes: Set[str]) -> Optional[Tuple[str, str]]:
-    """(clase de valor, ejemplo) que encaja con todos los usos, o None si no hay pistas o se contradicen."""
+    """(value kind, sample) compatible with every usage, or None when there are no hints or they conflict."""
     for kind in ("dict", "str", "bytes", "list", "set", "callable"):
         if kind in votes and votes <= {kind, "iterable", "indexed"}:
             return kind, KIND_SAMPLES[kind]
     if votes and votes <= {"iterable", "indexed"}:
-        # Con un índice hace falta algún elemento; solo recorrida, una lista vacía es lo más seguro.
+        # Indexing needs at least one element; when it is only iterated, an empty list is safest.
         return "list", "[1, 2, 3]" if "indexed" in votes else "[]"
     if votes == {"number"}:
         return "number", "1"
@@ -627,7 +630,7 @@ def _usage_sample(votes: Set[str]) -> Optional[Tuple[str, str]]:
 
 
 def _fits(expr: str, kind: str) -> bool:
-    """El valor expr (un literal) es de la clase de valor kind."""
+    """True when expr (a literal) is of value kind kind."""
     try:
         value = ast.literal_eval(expr)
     except (ValueError, SyntaxError):
@@ -643,8 +646,8 @@ def _fits(expr: str, kind: str) -> bool:
 
 def param_sample(param: ast.arg, ctx: SampleContext, votes: Set[str], *, depth: int = 0) -> Optional[Sample]:
     """
-    Valor de ejemplo de un parámetro obligatorio. None si está anotado con un tipo que no se sabe
-    construir: el test no puede llamar a la función con un valor inventado de otro tipo.
+    Sample value for a required parameter. None when it is annotated with a type that cannot be
+    built: the test must not call the function with a made-up value of another type.
     """
     by_name = sample_for_arg(param.arg)
     known_name = param.arg.lower() in SAMPLE_BY_NAME
@@ -666,8 +669,9 @@ def param_sample(param: ast.arg, ctx: SampleContext, votes: Set[str], *, depth: 
 
 def boundary_values(sample: Sample, name: str) -> List[Tuple[str, str]]:
     """
-    Valores límite del primer parámetro según su clase de valor; vacío si no tiene sentido
-    variarlo. Un contenedor tipado se prueba vacío, con un elemento y con dos, siempre de su tipo.
+    Boundary values for the first parameter according to its value kind; empty when varying it
+    makes no sense. A typed container is tried empty, with one element and with two, always of
+    its element type.
     """
     if sample.kind not in _BOUNDARY_KINDS:
         return []
@@ -684,16 +688,15 @@ def boundary_values(sample: Sample, name: str) -> List[Tuple[str, str]]:
     return boundary_samples_for_param(name, annotation, sample.expr)
 
 
-# --- Plan de llamada ----------------------------------------------------------------------------
+# --- Call plan ---------------------------------------------------------------------------------
 
 class CallPlan(NamedTuple):
     """
-    Cómo llamar a un objetivo. positional y names son los argumentos posicionales y los nombres
-    de sus parámetros; keywords, los de solo palabra clave (nombre=valor). static_names y
-    static_values son los parámetros y valores con los que se evalúa el cuerpo de forma estática
-    (también los que se quedan con su valor por defecto literal). assumed, los parámetros con un
-    valor supuesto; missing, los que no se saben construir. first es el primer parámetro
-    posicional obligatorio: el que varían los tests de valores límite y de entrada None.
+    How to call a target. positional and names are the positional arguments and their parameter
+    names; keywords, the keyword-only ones (name=value). static_names and static_values are the
+    parameters and values used to evaluate the body statically (including those left at a literal
+    default). assumed lists parameters with an assumed value; missing, those that cannot be built.
+    first is the first required positional parameter: the one boundary and None-input tests vary.
     """
 
     positional: List[str]
@@ -707,11 +710,11 @@ class CallPlan(NamedTuple):
 
     @property
     def arg_str(self) -> str:
-        """Los argumentos de la llamada, tal como van entre paréntesis."""
+        """The call's arguments, as written between the parentheses."""
         return ", ".join([*self.positional, *self.keywords])
 
     def with_first(self, expr: str) -> str:
-        """Los argumentos con el primer posicional sustituido por expr."""
+        """The arguments with the first positional one replaced by expr."""
         return ", ".join([expr, *self.positional[1:], *self.keywords])
 
 
@@ -724,7 +727,7 @@ def _literal_default(node: ast.AST) -> Optional[str]:
 
 
 def function_params(func: FuncNode, skip_first: bool) -> Tuple[List[ast.arg], Dict[str, ast.AST], Set[str]]:
-    """(parámetros sin *args ni **kwargs, sus valores por defecto, los de solo palabra clave)."""
+    """(parameters excluding *args and **kwargs, their default values, the keyword-only ones)."""
     args = func.args
     positional = [*args.posonlyargs, *args.args]
     if skip_first and positional:
@@ -736,7 +739,7 @@ def function_params(func: FuncNode, skip_first: bool) -> Tuple[List[ast.arg], Di
 
 
 def plan_call(func: Optional[FuncNode], ctx: SampleContext, *, skip_first: bool = False) -> CallPlan:
-    """Plan de llamada de una función; skip_first descarta self o cls en los métodos."""
+    """Call plan for a function; skip_first drops self or cls for methods."""
     plan = CallPlan([], [], [], [], [], [], [], None)
     if func is None:
         return plan
@@ -752,7 +755,7 @@ def plan_call(func: Optional[FuncNode], ctx: SampleContext, *, skip_first: bool 
             continue
         sample = param_sample(param, ctx, votes.get(name, set()))
         if sample is None:
-            plan.missing.append(f"{name} ({ast.unparse(param.annotation) if param.annotation else 'sin tipo'})")
+            plan.missing.append(f"{name} ({ast.unparse(param.annotation) if param.annotation else 'untyped'})")
             continue
         if sample.assumed:
             plan.assumed.append(name)
@@ -768,14 +771,14 @@ def plan_call(func: Optional[FuncNode], ctx: SampleContext, *, skip_first: bool 
     return plan
 
 
-# --- Objeto sobre el que se llama un método -----------------------------------------------------
+# --- The object a method is called on ----------------------------------------------------------
 
 class Receiver(NamedTuple):
     """
-    Cómo llegar a un método: target es lo que se llama (obj.m o Clase.m) y setup, la expresión
-    que crea obj. assumed indica que se construye con valores supuestos o con un constructor
-    heredado de fuera del módulo; skip, por qué no se puede probar (abstracta, constructor que
-    no se sabe completar). kind es el tipo de método: method, static, class o property.
+    How to reach a method: target is what gets called (obj.m or Class.m) and setup, the
+    expression that creates obj. assumed means it is built from assumed values or with a
+    constructor inherited from outside the module; skip, why it cannot be tested (abstract, a
+    constructor that cannot be completed). kind is the method kind: method, static, class or property.
     """
 
     target: str
@@ -800,12 +803,12 @@ def _construction_assumed(model: ClassModel, ctx: SampleContext) -> bool:
 
 
 def receiver_for(class_name: str, method: str, ctx: SampleContext) -> Receiver:
-    """Cómo llegar al método: sobre la clase si es estático o de clase, sobre un objeto creado si no."""
+    """How to reach the method: on the class for static and class methods, otherwise on a freshly built object."""
     model = ctx.classes[class_name]
     kind = model.method_kinds.get(method, "method")
     if model.ui:
-        reason = (f"Es un componente de interfaz de {model.ui}: necesita la aplicación en marcha. "
-                  "Pruébalo con las herramientas del framework (en Textual, App.run_test()).")
+        reason = (f"It is a {model.ui} UI component: it needs the application running. "
+                  "Test it with the framework's own tools (in Textual, App.run_test()).")
         return Receiver(f"obj.{method}", None, False, reason, kind)
     if kind in ("static", "class"):
         ctx.used_names.add(class_name)
@@ -817,24 +820,25 @@ def receiver_for(class_name: str, method: str, ctx: SampleContext) -> Receiver:
 
 
 def instantiation_for(class_name: str, ctx: SampleContext) -> Tuple[Optional[str], Optional[str]]:
-    """(expresión que crea la clase, motivo para no probarla)."""
+    """(expression that creates the instance, reason not to test it)."""
     model = ctx.classes[class_name]
     if model.abstract:
-        return None, f"{class_name} es abstracta: no se puede instanciar."
+        return None, f"{class_name} is abstract: it cannot be instantiated."
     expr = construct_expr(class_name, ctx)
     if expr is None:
-        return None, f"No se sabe construir {class_name}: complétalo a mano con valores válidos."
+        return None, f"Cannot work out how to construct {class_name}: fill it in by hand with valid values."
     return expr, None
 
 
 def construction_assumed(class_name: str, ctx: SampleContext) -> bool:
-    """La clase se construye con valores supuestos o con un constructor que no se conoce."""
+    """True when the class is built from assumed values or with a constructor that is not known."""
     return _construction_assumed(ctx.classes[class_name], ctx)
 
 
-# --- Import del módulo analizado ----------------------------------------------------------------
+# --- Importing the analysed module --------------------------------------------------------------
 
 def _from_import(module: str, names: Set[str]) -> str:
+    """A `from module import ...` line, wrapped in parentheses when it would be too long."""
     statement = f"from {module} import {', '.join(sorted(names))}  # noqa: E402"
     if len(statement) > 110:
         body = "".join(f"    {n},\n" for n in sorted(names))
@@ -845,9 +849,9 @@ def _from_import(module: str, names: Set[str]) -> str:
 def import_header(source_filepath: str, output_test_filepath: str, names: Set[str], modules: Set[str],
                   foreign: Optional[Dict[str, Set[str]]] = None) -> List[str]:
     """
-    Líneas que importan el módulo analizado desde la suite. Su raíz, relativa a la suite, entra en
-    sys.path, y los objetivos se importan por su nombre: import * no trae lo que excluye __all__.
-    foreign son las clases que hacen falta de otros módulos del proyecto, por módulo.
+    Lines that import the analysed module from the suite. Its root, relative to the suite, is put
+    on sys.path, and targets are imported by name (import * would miss whatever __all__ excludes).
+    foreign maps other project modules to the classes the suite needs from them.
     """
     dotted, root = module_import(source_filepath)
     rel = os.path.relpath(root, os.path.dirname(os.path.abspath(output_test_filepath))).replace(os.sep, "/")
@@ -856,7 +860,7 @@ def import_header(source_filepath: str, output_test_filepath: str, names: Set[st
         "import sys",
         *(f"import {m}" for m in sorted(modules)),
         "",
-        f"# Raíz desde la que se importa {dotted}, relativa a este archivo.",
+        f"# Root that {dotted} is imported from, relative to this file.",
         f'_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "{rel}"))',
         "if _ROOT not in sys.path:",
         "    sys.path.insert(0, _ROOT)",

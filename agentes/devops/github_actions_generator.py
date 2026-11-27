@@ -3,8 +3,8 @@ import os
 
 class GitHubActionsGenerator:
     """
-    Generador automatizado de flujos de trabajo defensivos para GitHub Actions (.github/workflows/ci.yml).
-    Incluye etapas de linting (Ruff), SAST (Bandit) y pruebas unitarias.
+    Generates a security-minded GitHub Actions workflow with linting (Ruff), SAST (Bandit) and
+    unit tests. The workflow grants the GITHUB_TOKEN read-only access to the repository.
     """
 
     GITHUB_WORKFLOW_TEMPLATE = """name: DevSecOps CI/CD Pipeline
@@ -20,44 +20,44 @@ permissions:
 
 jobs:
   security-and-lint:
-    name: Auditoría de Seguridad y Calidad
+    name: Security and quality audit
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Código
+      - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Instalar Dependencias
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ruff bandit pytest
 
-      - name: Ejecutar Linter (Ruff)
+      - name: Lint (Ruff)
         run: |
           ruff check .
 
-      - name: Análisis SAST de Seguridad (Bandit)
+      - name: Security SAST (Bandit)
         run: |
           bandit -r . -f txt
 
   unit-tests:
-    name: Pruebas Unitarias y Cobertura
+    name: Unit tests
     needs: security-and-lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Código
+      - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Ejecutar Pruebas
+      - name: Run tests
         run: |
           python -m unittest discover -s . -p "test_*.py"
 """
@@ -65,7 +65,7 @@ jobs:
     @staticmethod
     def generate_workflow(output_filepath: str) -> str:
         """
-        Genera un archivo de flujo de trabajo seguro para GitHub Actions.
+        Write the workflow to output_filepath (parent directories are created) and return the path.
         """
         dirpath = os.path.dirname(os.path.abspath(output_filepath))
         os.makedirs(dirpath, exist_ok=True)

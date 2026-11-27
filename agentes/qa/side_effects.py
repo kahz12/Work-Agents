@@ -1,17 +1,18 @@
 """
-Detección de efectos secundarios en el código analizado.
+Side-effect detection in the analysed code.
 
-El generador de tests sustituye por dobles todo lo que escribe, borra, mueve, ejecuta
-procesos o abre conexiones. Si una de esas llamadas se le escapa, el test generado la haría
-de verdad: `delete_items(...)` con un `shutil.rmtree` sin sustituir borra archivos reales.
+The test generator replaces with test doubles everything that writes, deletes, moves, starts
+processes or opens connections. If one of those calls slipped through, the generated test
+would perform it for real: `delete_items(...)` with an unpatched `shutil.rmtree` deletes real
+files.
 
-Por eso la detección es amplia a propósito: es preferible sustituir de más que de menos.
-Cada llamada detectada da un objetivo de `unittest.mock.patch` que funciona con la forma
-en que el módulo la importa:
+That is why detection is deliberately broad: patching too much is better than too little.
+Every detected call yields a `unittest.mock.patch` target that works with the way the module
+imports it:
 
   import shutil; shutil.rmtree(p)        -> patch("shutil.rmtree")
   import shutil as sh; sh.rmtree(p)      -> patch("shutil.rmtree")
-  from shutil import rmtree; rmtree(p)   -> patch("<modulo>.rmtree")
+  from shutil import rmtree; rmtree(p)   -> patch("<module>.rmtree")
   Path(p).unlink()                       -> patch("pathlib.Path.unlink")
 """
 from __future__ import annotations
@@ -20,10 +21,10 @@ import ast
 import re
 from typing import Optional, Tuple
 
-from ..common.imports import ImportMap, attr_chain  # noqa: F401 - ImportMap se reexporta
+from ..common.imports import ImportMap, attr_chain  # noqa: F401 - ImportMap is re-exported
 
-# Llamadas con efectos, por nombre completo. Las de os son solo las que escriben, borran,
-# cambian permisos o lanzan procesos: os.path.exists o os.listdir no hacen falta sustituirlas.
+# Calls with side effects, by fully qualified name. The os entries are only those that write,
+# delete, change permissions or start processes: os.path.exists or os.listdir need no patching.
 IO_NAMES = frozenset({
     "open", "urllib.request.urlopen",
     "os.system", "os.popen", "os.remove", "os.unlink", "os.rmdir", "os.removedirs",
@@ -31,26 +32,28 @@ IO_NAMES = frozenset({
     "os.chown", "os.symlink", "os.link", "os.truncate", "os.startfile", "os.kill",
     "os.execv", "os.execve", "os.execvp", "os.spawnv", "os.spawnl", "os.fork",
 })
-# Módulos en los que cualquier llamada se considera E/S.
+# Modules where any call counts as I/O.
 IO_PREFIXES = (
     "requests.", "httpx.", "aiohttp.", "urllib.request.", "http.client.", "socket.",
     "ftplib.", "smtplib.", "paramiko.", "subprocess.", "sqlite3.", "shutil.",
 )
-# Métodos de pathlib.Path con efectos. Se detectan aunque el objeto no sea un Path
-# (no se puede saber sin ejecutar): sustituir un método que no se usa no hace daño.
+# pathlib.Path methods with side effects. They are matched even when the receiver may not be a
+# Path (that cannot be known without running the code): patching an unused method is harmless.
 PATH_METHODS = frozenset({
     "unlink", "rmdir", "rename", "write_text", "write_bytes", "mkdir", "touch",
     "chmod", "symlink_to", "hardlink_to",
 })
 
 
-# En esos módulos, crear una excepción o un resultado no es E/S: subprocess.TimeoutExpired(...) o
-# subprocess.CompletedProcess(...) solo construyen un objeto. Sustituirlos por un doble rompería
-# además los except que los capturan ("catching classes that do not inherit from BaseException").
+# Within those modules, building an exception or a result object is not I/O:
+# subprocess.TimeoutExpired(...) or subprocess.CompletedProcess(...) only construct a value.
+# Replacing them with a double would also break the except clauses that catch them ("catching
+# classes that do not inherit from BaseException is not allowed").
 _NOT_IO = re.compile(r"(Error|Exception|Expired|Warning|Exit)$|^CompletedProcess$")
 
 
 def is_io(name: str) -> bool:
+    """True when a fully qualified call name has side effects that a generated test must patch."""
     if _NOT_IO.search(name.rsplit(".", 1)[-1]):
         return False
     return name in IO_NAMES or name.startswith(IO_PREFIXES)
@@ -58,7 +61,7 @@ def is_io(name: str) -> bool:
 
 def classify(call: ast.Call, imports: ImportMap) -> Optional[Tuple[str, str]]:
     """
-    (nombre completo, objetivo de patch) si la llamada tiene efectos; None si no.
+    (fully qualified name, patch target) when the call has side effects, otherwise None.
     """
     func = call.func
     if isinstance(func, ast.Name):
@@ -74,7 +77,7 @@ def classify(call: ast.Call, imports: ImportMap) -> Optional[Tuple[str, str]]:
             return full, full
     if isinstance(func, ast.Attribute) and func.attr in PATH_METHODS:
         head = chain.split(".")[0] if chain else ""
-        # os.rename y similares ya se han resuelto arriba; aquí solo métodos de objetos.
+        # os.rename and friends were resolved above; only methods on objects reach this point.
         if head not in imports.modules:
             target = f"pathlib.Path.{func.attr}"
             return target, target

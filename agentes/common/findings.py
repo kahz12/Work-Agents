@@ -1,46 +1,46 @@
 """
-Hallazgo común a todos los agentes y normalización de severidades.
+The finding type shared by every agent, and severity normalisation.
 
-Cada auditor devuelve sus resultados con la forma que le resulta natural (tuplas de
-tres o cuatro elementos, con la severidad en posiciones distintas). Este módulo define
-el tipo único con el que trabajan el orquestador, los informes y el CLI.
+Each auditor returns results in whatever shape suits it (three- or four-element tuples, with
+the severity in different positions). This module defines the single type that the
+orchestrator, the reports and the CLI work with.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Union
 
-# De más grave a menos grave. Los niveles desconocidos se tratan como MEDIO.
-SEVERITY_ORDER = ["CRITICO", "ERROR", "ALTO", "MEDIO", "BAJO", "INFORMACION", "OK"]
-BLOCKING_LEVELS = frozenset({"CRITICO", "ERROR", "ALTO"})
-SILENT_LEVELS = frozenset({"INFORMACION", "OK"})
+# Most to least severe. Unknown levels are treated as MEDIUM.
+SEVERITY_ORDER = ["CRITICAL", "ERROR", "HIGH", "MEDIUM", "LOW", "INFO", "OK"]
+BLOCKING_LEVELS = frozenset({"CRITICAL", "ERROR", "HIGH"})
+SILENT_LEVELS = frozenset({"INFO", "OK"})
 
+# Spellings used by third-party tools (Bandit, OSV, linters) mapped onto SEVERITY_ORDER.
 _LEVEL_ALIASES = {
-    "CRÍTICO": "CRITICO", "CRITICAL": "CRITICO", "HIGH": "ALTO", "MEDIUM": "MEDIO",
-    "MODERATE": "MEDIO", "LOW": "BAJO", "INFO": "INFORMACION", "INFORMACIÓN": "INFORMACION",
-    "FALLO": "ERROR", "WARNING": "MEDIO", "ADVERTENCIA": "MEDIO",
+    "MODERATE": "MEDIUM", "WARNING": "MEDIUM", "WARN": "MEDIUM",
+    "INFORMATION": "INFO", "FAIL": "ERROR", "FAILED": "ERROR",
 }
 
 
 def normalize_level(level: Any) -> str:
-    """Unifica las variantes de severidad que devuelven los distintos agentes."""
+    """Map the severity spellings used by the different agents onto SEVERITY_ORDER."""
     text = str(level or "").strip().upper()
     text = _LEVEL_ALIASES.get(text, text)
-    return text if text in SEVERITY_ORDER else "MEDIO"
+    return text if text in SEVERITY_ORDER else "MEDIUM"
 
 
 def severity_rank(level: Any) -> int:
-    """Posición en SEVERITY_ORDER: menor es más grave."""
+    """Index in SEVERITY_ORDER: lower means more severe."""
     return SEVERITY_ORDER.index(normalize_level(level))
 
 
 @dataclass
 class Finding:
     """
-    Un hallazgo de cualquier agente.
+    A finding reported by any agent.
 
-    line es 1 o más cuando se conoce la línea y 0 cuando no aplica (una cabecera HTTP,
-    un archivo entero). level se normaliza al crear el objeto.
+    line is 1 or greater when the line is known, and 0 when it does not apply (an HTTP
+    header, a whole file). level is normalised when the object is created.
     """
 
     file: str
@@ -64,7 +64,7 @@ class Finding:
         return self.level in SILENT_LEVELS
 
     def to_dict(self) -> Dict[str, Any]:
-        """Forma usada en los informes JSON y SARIF (esquema agentes.pipeline.v1)."""
+        """Shape used by the JSON and SARIF reports (schema agentes.pipeline.v1)."""
         return {
             "file": self.file,
             "line": self.line,
@@ -78,7 +78,7 @@ class Finding:
         return cls(
             file=data.get("file", ""),
             line=data.get("line", 0),
-            level=data.get("level", "MEDIO"),
+            level=data.get("level", "MEDIUM"),
             message=data.get("message", ""),
             rule_id=data.get("rule_id", "") or "",
         )
@@ -96,7 +96,7 @@ def as_dicts(findings: Iterable[FindingLike]) -> List[Dict[str, Any]]:
 
 
 def count_by_level(findings: Iterable[FindingLike]) -> Dict[str, int]:
-    """Cuenta por severidad, en orden de gravedad."""
+    """Count findings per severity, ordered from most to least severe."""
     counts: Dict[str, int] = {}
     for item in findings:
         lvl = as_finding(item).level

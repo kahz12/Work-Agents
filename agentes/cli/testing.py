@@ -1,5 +1,5 @@
 """
-Comandos CLI de QA y pruebas: test, testability y contract.
+QA commands: test, testability and contract.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _SCHEMA_TYPES = {
 def _print_test_failures(failure_details: List[Dict[str, Any]], verbose: bool) -> None:
     if not failure_details:
         return
-    ui.section("Tests que no pasan")
+    ui.section("Failing tests")
     for item in failure_details:
         trace = str(item["traceback"]).strip()
         ui.out(f"  {ui.style(item['test'], 'bold')}")
@@ -40,11 +40,11 @@ def _print_test_failures(failure_details: List[Dict[str, Any]], verbose: bool) -
         else:
             ui.out(f"    {ui.style(trace.splitlines()[-1] if trace else '', 'red')}")
     if not verbose:
-        ui.hint("  Añade --verbose para ver las trazas completas.")
+        ui.hint("  Add --verbose to see the full tracebacks.")
 
 
 def cmd_test(args: argparse.Namespace) -> int:
-    """Ejecuta una suite unittest y evalúa su calidad y cobertura estimada."""
+    """Run a unittest suite and assess its quality and estimated coverage."""
     from ..qa.test_runner import QATestRunner
 
     path = require_python_file(args.path)
@@ -66,49 +66,49 @@ def cmd_test(args: argparse.Namespace) -> int:
         emit_json(result)
         return code
 
-    ui.title(f"Tests de {rel(path)}")
+    ui.title(f"Tests in {rel(path)}")
     ui.kv([
-        ("Ejecutados", result["tests_run"]),
-        ("Correctos", result["passed"]),
-        ("Fallidos", result["failures"]),
-        ("Con error", result["errors"]),
-        ("Omitidos", result["skipped"]),
-        ("Tasa de éxito", f"{result['pass_rate_percentage']}%"),
-        ("Duración", f"{result['duration_seconds']} s"),
+        ("Run", result["tests_run"]),
+        ("Passed", result["passed"]),
+        ("Failed", result["failures"]),
+        ("Errors", result["errors"]),
+        ("Skipped", result["skipped"]),
+        ("Pass rate", f"{result['pass_rate_percentage']}%"),
+        ("Duration", f"{result['duration_seconds']} s"),
     ], indent=0)
 
     if result["tests_run"] == 0:
         ui.out()
-        ui.warn("No se encontró ningún test unittest. Si la suite es de pytest, ejecútala con 'pytest'.")
+        ui.warn("No unittest tests were found. If this is a pytest suite, run it with 'pytest'.")
 
     _print_test_failures(result["failure_details"], args.verbose)
 
     if coverage.get("functions_total"):
-        ui.section("Cobertura estimada")
+        ui.section("Estimated coverage")
         ui.out(
-            f"  {coverage['functions_tested']} de {coverage['functions_total']} funciones públicas de "
-            f"'{coverage.get('module')}' tienen algún test ({coverage['coverage_percentage']}%)."
+            f"  {coverage['functions_tested']} of {coverage['functions_total']} public functions in "
+            f"'{coverage.get('module')}' have at least one test ({coverage['coverage_percentage']}%)."
         )
-        ui.hint("  Es una estimación por nombres, no una medición de líneas ejecutadas.")
+        ui.hint("  This is an estimate based on names, not a measurement of executed lines.")
 
     q_findings = [
         Finding(path, line, level, f"[{rule}] {msg}", "TEST-QUALITY")
         for line, rule, level, msg in quality.get("findings", [])
     ]
     if q_findings:
-        ui.section(f"Calidad de la suite ({len(q_findings)}): {describe_counts(count_by_level(q_findings))}")
+        ui.section(f"Suite quality ({len(q_findings)}): {describe_counts(count_by_level(q_findings))}")
         ui.findings(visible(q_findings), limit=args.limit)
 
     ui.out()
     if code == 0:
-        ui.ok("Todos los tests pasan.")
+        ui.ok("All tests pass.")
     elif failed:
-        ui.fail(f"{failed} tests no pasan.")
+        ui.fail(f"{failed} tests do not pass.")
     return code
 
 
 def cmd_testability(args: argparse.Namespace) -> int:
-    """Detecta impedimentos de testabilidad en un módulo y propone escenarios de prueba."""
+    """Find what makes a module hard to test and suggest test scenarios."""
     from ..qa.test_generator import QATestGenerator
 
     path = require_python_file(args.path)
@@ -122,34 +122,35 @@ def cmd_testability(args: argparse.Namespace) -> int:
         emit_json({"file": path, "findings": dicts(findings), "scenarios": matrix})
         return 0
 
-    ui.title(f"Testabilidad de {rel(path)}")
-    show_findings(findings, args.limit, empty="No se detectaron impedimentos para probar este módulo.")
+    ui.title(f"Testability of {rel(path)}")
+    show_findings(findings, args.limit, empty="Nothing found that makes this module hard to test.")
     if args.matrix:
-        ui.section(f"Escenarios de prueba sugeridos ({len(matrix)})")
+        ui.section(f"Suggested test scenarios ({len(matrix)})")
         rows = [
             (s.get("target", ""), s.get("category", "").strip("[]"), f"{s.get('scenario', '')}: {s.get('expected', '')}")
             for s in (matrix if args.limit <= 0 else matrix[: args.limit])
         ]
-        ui.table(["Función", "Categoría", "Escenario y resultado esperado"], rows)
+        ui.table(["Function", "Category", "Scenario and expected result"], rows)
         if args.limit > 0 and len(matrix) > args.limit:
-            ui.hint(f"  ... y {len(matrix) - args.limit} más. Usa --limit 0 para verlos todos.")
+            ui.hint(f"  ... and {len(matrix) - args.limit} more. Use --limit 0 to show them all.")
     else:
         ui.out()
-        ui.hint("Añade --matrix para ver los escenarios de prueba sugeridos.")
-    ui.hint(f"Para generar la suite: agentes generate tests --source {rel(path)}")
+        ui.hint("Add --matrix to see the suggested test scenarios.")
+    ui.hint(f"To generate the suite: agentes generate tests --source {rel(path)}")
     return 0
 
 
-def _schema_from_json(node: Any, where: str = "esquema") -> Any:
+def _schema_from_json(node: Any, where: str = "schema") -> Any:
+    """Turn a JSON schema of type names ({"id": "int", "tags": ["str"]}) into Python types."""
     if isinstance(node, dict):
         return {key: _schema_from_json(value, f"{where}.{key}") for key, value in node.items()}
     if isinstance(node, list):
         if len(node) != 1:
-            raise CliError(f"En {where}, una lista debe declarar un solo tipo, por ejemplo [\"str\"].")
+            raise CliError(f"In {where}, a list must declare exactly one type, for example [\"str\"].")
         return [_schema_from_json(node[0], f"{where}[]")]
     if isinstance(node, str) and node.lower() in _SCHEMA_TYPES:
         return _SCHEMA_TYPES[node.lower()]
-    raise CliError(f"Tipo no reconocido en {where}: {node!r}.", "Tipos admitidos: str, int, float, bool, list y dict.")
+    raise CliError(f"Unrecognised type in {where}: {node!r}.", "Supported types: str, int, float, bool, list and dict.")
 
 
 def _parse_contract_inputs(args: argparse.Namespace) -> Tuple[Any, Dict[str, str], Any]:
@@ -160,12 +161,12 @@ def _parse_contract_inputs(args: argparse.Namespace) -> Tuple[Any, Dict[str, str
             with open(schema_path, "r", encoding="utf-8") as fh:
                 schema = _schema_from_json(json.load(fh))
         except json.JSONDecodeError as exc:
-            raise CliError(f"{args.schema} no es JSON válido: {exc}") from exc
+            raise CliError(f"{args.schema} is not valid JSON: {exc}") from exc
 
     headers: Dict[str, str] = {}
     for raw in args.header or []:
         if ":" not in raw:
-            raise CliError(f"Cabecera mal formada: {raw!r}.", "Usa el formato 'Nombre: valor'.")
+            raise CliError(f"Malformed header: {raw!r}.", "Use the format 'Name: value'.")
         name, value = raw.split(":", 1)
         headers[name.strip()] = value.strip()
 
@@ -174,16 +175,17 @@ def _parse_contract_inputs(args: argparse.Namespace) -> Tuple[Any, Dict[str, str
         try:
             body = json.loads(args.body)
         except json.JSONDecodeError:
+            # Not JSON: send it verbatim as a plain-text body.
             body = args.body
     return schema, headers, body
 
 
 def cmd_contract(args: argparse.Namespace) -> int:
-    """Valida estado HTTP, esquema JSON y latencia de un endpoint."""
+    """Check an endpoint's HTTP status, JSON schema and latency."""
     from ..qa.api_contract_testing import APIContractTester
 
     if not re.match(r"^https?://", args.url, re.IGNORECASE):
-        raise CliError("La URL debe empezar por http:// o https://.")
+        raise CliError("The URL must start with http:// or https://.")
     schema, headers, body = _parse_contract_inputs(args)
 
     result = APIContractTester.request_and_validate(
@@ -196,17 +198,17 @@ def cmd_contract(args: argparse.Namespace) -> int:
         emit_json(result)
         return code
 
-    ui.title(f"Contrato de {args.method.upper()} {args.url}")
-    ui.out(f"Tiempo de respuesta: {result.get('elapsed_ms')} ms")
+    ui.title(f"Contract for {args.method.upper()} {args.url}")
+    ui.out(f"Response time: {result.get('elapsed_ms')} ms")
     ui.out()
     rows = []
     for name, status, detail in result.get("assertions", []):
         good = str(status).upper() == "OK"
-        rows.append((name, ("OK" if good else "FALLO", "green" if good else "red"), detail))
-    ui.table(["Comprobación", "Estado", "Detalle"], rows)
+        rows.append((name, ("OK" if good else "FAILED", "green" if good else "red"), detail))
+    ui.table(["Check", "Status", "Detail"], rows)
     ui.out()
     if code == 0:
-        ui.ok("El endpoint cumple el contrato.")
+        ui.ok("The endpoint honours the contract.")
     else:
-        ui.fail("El endpoint no cumple el contrato.")
+        ui.fail("The endpoint does not honour the contract.")
     return code

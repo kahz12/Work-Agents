@@ -1,5 +1,7 @@
 # Work-Agents
 
+**English** | [Español](README.es.md)
+
 Security, quality and operations auditing for Python projects from a single command: `agentes`.
 
 [![CI](https://github.com/kahz12/Work-Agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kahz12/Work-Agents/actions/workflows/ci.yml)
@@ -10,9 +12,6 @@ Work-Agents bundles eight DevSecOps, SRE and QA agents. It reviews a project's c
 configuration, detects exposed secrets and dependencies with known vulnerabilities, generates
 hardened configurations and produces reports in JSON, HTML and SARIF 2.1.0, the format GitHub
 Code Scanning displays natively.
-
-> The command-line interface, its messages and the generated reports are in Spanish. This
-> document and the [user guide](docs/user-guide.md) explain every command and message in English.
 
 ## Features
 
@@ -71,9 +70,9 @@ agentes generate compose --service api --port 8000
 ![Output of agentes pipeline on a real project](docs/img/pipeline.png)
 
 The table lists each stage (static analysis, secrets, metrics and SOLID, OpenAPI,
-infrastructure and dependencies, dependency vulnerabilities) with its status (`OK`,
-`OMITIDA` = skipped, `FALLO` = failed). Findings follow, most severe first (`MEDIO` = medium).
-The [user guide](docs/user-guide.md#reading-the-output) has a full glossary of the output.
+infrastructure and dependencies, dependency vulnerabilities) with its status (`OK`, `SKIPPED`
+or `FAILED`). Findings follow, most severe first. The
+[user guide](docs/user-guide.md#reading-the-output) explains every part of the output.
 
 ## Real-world run
 
@@ -82,8 +81,7 @@ The screenshots in this section and the previous one come from an audit of
 two virtual environments. Personal paths are redacted.
 
 `agentes vulns` checks the packages installed in the project's virtual environments, which are
-what actually runs, and gives the version that fixes each vulnerability (`Corregido en` = fixed
-in):
+what actually runs, and gives the version that fixes each vulnerability (`Fixed in`):
 
 ![Output of agentes vulns with six CVEs in pip](docs/img/vulns.png)
 
@@ -143,8 +141,9 @@ Source code is never sent anywhere. Only three features contact external service
 
 - [User guide](docs/user-guide.md): complete reference for every command, rule catalog, report
   formats, continuous integration and library usage.
-- [Guía de usuario](docs/guia-de-usuario.md): the same guide in Spanish.
-- Per-agent READMEs (in Spanish): [`defensive`](agentes/defensive/README.md),
+- [Guía de usuario](docs/guia-de-usuario.md): the same guide in Spanish, with a glossary of
+  the output.
+- Per-agent READMEs: [`defensive`](agentes/defensive/README.md),
   [`quality`](agentes/quality/README.md), [`hardening`](agentes/hardening/README.md),
   [`refactor`](agentes/refactor/README.md), [`qa`](agentes/qa/README.md),
   [`sre`](agentes/sre/README.md), [`devops`](agentes/devops/README.md) and

@@ -1,6 +1,7 @@
 """
-Catálogo de reglas del análisis estático y del auditor de rendimiento: para cada regla, un
-código que la activa y otro parecido que no. Si una regla cambia de criterio, el test dice cuál.
+Rule catalogue for static analysis and the performance auditor: for each rule, code that
+triggers it and similar code that does not. When a rule changes its criteria, the failing test
+names the rule.
 """
 import ast
 import os
@@ -22,93 +23,97 @@ def _messages(code: str, filename: str = "mod.py"):
     return [msg for _, _, msg in checker.issues]
 
 
-# (código que activa la regla, código parecido que no, fragmento del mensaje)
-CATALOGO = {
-    "demasiados argumentos": (
+# (code that triggers the rule, similar code that does not, message fragment)
+CATALOGUE = {
+    "too many arguments": (
         "def f(a, b, c, d, e, g):\n    '''D.'''\n", "def f(self, a, b, c, d, e):\n    '''D.'''\n",
-        "recibe 6 argumentos"),
-    "argumento por defecto mutable": (
-        "def f(x={}):\n    '''D.'''\n", "def f(x=None):\n    '''D.'''\n", "por defecto mutable"),
-    "except desnudo": ("try:\n    x()\nexcept:\n    raise\n", "try:\n    x()\nexcept ValueError:\n    raise\n",
-                       "Uso de 'except:' genérico"),
-    "eval": ("eval(x)\n", "literal_eval(x)\n", "riesgo dinámico 'eval()'"),
+        "takes 6 arguments"),
+    "mutable default argument": (
+        "def f(x={}):\n    '''D.'''\n", "def f(x=None):\n    '''D.'''\n", "mutable default argument"),
+    "bare except": ("try:\n    x()\nexcept:\n    raise\n", "try:\n    x()\nexcept ValueError:\n    raise\n",
+                    "bare 'except:'"),
+    "eval": ("eval(x)\n", "literal_eval(x)\n", "dynamic code execution function 'eval()'"),
     "pickle.loads": ("import pickle\npickle.loads(b)\n", "import json\njson.loads(b)\n", "pickle.loads()"),
     "os.popen": ("import os\nos.popen(cmd)\n", "import os\nos.getcwd()\n", "os.popen()"),
-    "yaml.load sin SafeLoader": (
+    "yaml.load without SafeLoader": (
         "import yaml\nyaml.load(s)\n", "import yaml\nyaml.load(s, Loader=yaml.SafeLoader)\nyaml.load(s, SafeLoader)\n",
-        "yaml.load()' sin SafeLoader"),
-    "hash débil": ("import hashlib\nhashlib.sha1(b)\n", "import hashlib\nhashlib.sha1(b, usedforsecurity=False)\n",
-                   "hashlib.sha1()"),
-    "TLS sin verificar": ("import requests\nrequests.get(u, verify=False, timeout=1)\n",
-                          "import requests\nrequests.get(u, timeout=1)\n", "verify=False"),
-    "HTTP sin timeout": ("import httpx\nhttpx.post(u)\n", "import httpx\nhttpx.post(u, timeout=3)\n",
-                         "Petición HTTP sin 'timeout'"),
-    "urlopen sin timeout": ("import urllib.request\nurllib.request.urlopen(u)\n",
-                            "import urllib.request\nurllib.request.urlopen(u, timeout=2)\n", "urlopen()' sin 'timeout'"),
+        "yaml.load()' without SafeLoader"),
+    "weak hash": ("import hashlib\nhashlib.sha1(b)\n", "import hashlib\nhashlib.sha1(b, usedforsecurity=False)\n",
+                  "hashlib.sha1()"),
+    "unverified TLS": ("import requests\nrequests.get(u, verify=False, timeout=1)\n",
+                       "import requests\nrequests.get(u, timeout=1)\n", "verify=False"),
+    "HTTP without timeout": ("import httpx\nhttpx.post(u)\n", "import httpx\nhttpx.post(u, timeout=3)\n",
+                             "HTTP request without an explicit 'timeout'"),
+    "urlopen without timeout": ("import urllib.request\nurllib.request.urlopen(u)\n",
+                                "import urllib.request\nurllib.request.urlopen(u, timeout=2)\n",
+                                "urlopen()' without an explicit 'timeout'"),
     "shell=True": ("import subprocess\nsubprocess.call(c, shell=True)\n", "import subprocess\nsubprocess.call(c)\n",
                    "shell=True"),
-    "SQL concatenado": ("cur.execute('SELECT ' + x)\n", "cur.execute('SELECT ?', (x,))\n", "concatenate en execute()"),
-    "SQL con %": ("cur.execute('SELECT %s' % x)\n", "cur.execute('SELECT %s', (x,))\n", "formato dinámico (%)"),
-    "SQL con f-string": ("cur.executemany(f'SELECT {x}', rows)\n", "cur.executemany('SELECT ?', rows)\n", "f-string en"),
-    "SQL con .format": ("cur.execute('SELECT {}'.format(x))\n", "cur.execute(QUERY)\n", "formato dinámico (.format)"),
+    "concatenated SQL": ("cur.execute('SELECT ' + x)\n", "cur.execute('SELECT ?', (x,))\n",
+                         "string concatenation in execute()"),
+    "SQL with %": ("cur.execute('SELECT %s' % x)\n", "cur.execute('SELECT %s', (x,))\n", "dynamic formatting (%)"),
+    "SQL with an f-string": ("cur.executemany(f'SELECT {x}', rows)\n", "cur.executemany('SELECT ?', rows)\n",
+                             "f-string in"),
+    "SQL with .format": ("cur.execute('SELECT {}'.format(x))\n", "cur.execute(QUERY)\n", "dynamic formatting (.format)"),
     "Jinja": ("import jinja2 as jinja\njinja.from_string(t)\n", "import json\njson.dumps(t)\n", "Jinja render/from_string"),
-    "time.sleep en async": ("import time\nasync def f():\n    '''D.'''\n    time.sleep(1)\n",
-                            "import time\ndef f():\n    '''D.'''\n    time.sleep(1)\n", "bloquea el event loop"),
-    "open con ruta construida": ("open(f'/tmp/{x}')\n", "open(RUTA)\n", "Path Traversal"),
-    "assert fuera de tests": ("assert x\n", "if not x:\n    raise ValueError\n", "Uso de assert"),
-    "secreto en una asignación": ("API_KEY = 'q8Zr4mN2pW7vX1kL'\n", "API_KEY = os.environ['API_KEY']\n",
-                                  "secreto hardcodeado en 'API_KEY'"),
-    "secreto en un atributo": ("self.password = 'q8Zr4mN2pW7vX1kL'\n", "self.password_field = 'q8Zr4mN2pW7vX1kL'\n",
-                               "secreto hardcodeado en 'password'"),
-    "random para un token": ("import random\ntoken = random.random()\n", "import secrets\ntoken = secrets.token_hex()\n",
-                             "módulo 'random'"),
+    "time.sleep in async": ("import time\nasync def f():\n    '''D.'''\n    time.sleep(1)\n",
+                            "import time\ndef f():\n    '''D.'''\n    time.sleep(1)\n", "blocks the event loop"),
+    "open with a built path": ("open(f'/tmp/{x}')\n", "open(PATH)\n", "path traversal"),
+    "assert outside tests": ("assert x\n", "if not x:\n    raise ValueError\n", "Use of assert"),
+    "secret in an assignment": ("API_KEY = 'q8Zr4mN2pW7vX1kL'\n", "API_KEY = os.environ['API_KEY']\n",
+                                "hardcoded secret in 'API_KEY'"),
+    "secret in an attribute": ("self.password = 'q8Zr4mN2pW7vX1kL'\n", "self.password_field = 'q8Zr4mN2pW7vX1kL'\n",
+                               "hardcoded secret in 'password'"),
+    "random for a token": ("import random\ntoken = random.random()\n", "import secrets\ntoken = secrets.token_hex()\n",
+                           "'random' module"),
 }
 
 
-@pytest.mark.parametrize("activa, no_activa, mensaje", CATALOGO.values(), ids=CATALOGO.keys())
-def test_regla(activa, no_activa, mensaje):
-    assert any(mensaje in m for m in _messages(activa)), _messages(activa)
-    assert not any(mensaje in m for m in _messages(no_activa)), _messages(no_activa)
+@pytest.mark.parametrize("triggers, does_not_trigger, message", CATALOGUE.values(), ids=CATALOGUE.keys())
+def test_rule(triggers, does_not_trigger, message):
+    assert any(message in m for m in _messages(triggers)), _messages(triggers)
+    assert not any(message in m for m in _messages(does_not_trigger)), _messages(does_not_trigger)
 
 
-@pytest.mark.parametrize("valor", [
-    "corta", "<tu-clave-aqui>", "$API_KEY", "${API_KEY}", "{api_key}", "xxxxxxxxxxxx", "changeme-now",
+# Spanish placeholders ("tu-clave-aqui") are recognised as well, since the tool is used on Spanish codebases.
+@pytest.mark.parametrize("value", [
+    "short", "<your-key-here>", "tu-clave-aqui", "$API_KEY", "${API_KEY}", "{api_key}", "xxxxxxxxxxxx", "changeme-now",
 ])
-def test_rellenos_que_no_cuentan_como_secreto(valor):
-    assert not any("secreto hardcodeado" in m for m in _messages(f"api_key = {valor!r}\n"))
+def test_placeholders_do_not_count_as_secrets(value):
+    assert not any("hardcoded secret" in m for m in _messages(f"api_key = {value!r}\n"))
 
 
-def test_asignaciones_que_no_se_pueden_revisar_no_lanzan():
+def test_assignments_that_cannot_be_checked_do_not_raise():
     assert _messages("token: str\nx[0] = 'q8Zr4mN2pW7vX1kL'\na, b = 1, 2\n") == []
 
 
-def test_en_tests_no_se_marcan_secretos_de_ejemplo_ni_assert():
+def test_sample_secrets_and_assert_are_not_flagged_in_tests():
     code = "API_KEY = 'q8Zr4mN2pW7vX1kL'\nconfig = {'token': 'q8Zr4mN2pW7vX1kL'}\nassert x\n"
     assert _messages(code, "test_mod.py") == []
 
 
-def test_analizador_con_un_archivo_que_no_existe_o_que_no_se_puede_analizar(tmp_path, monkeypatch):
+def test_analyser_with_a_missing_or_unanalysable_file(tmp_path, monkeypatch):
     missing = str(tmp_path / "no.py")
     assert StaticCodeAnalyzer.analyze_python_files([missing], prefer_bandit=False) == {
-        missing: [(0, "ERROR", f"El archivo {missing} no existe.")]}
+        missing: [(0, "ERROR", f"File {missing} does not exist.")]}
     mod = tmp_path / "mod.py"
     mod.write_text("x = 1\n", encoding="utf-8")
 
-    def falla(self, node):
-        raise RuntimeError("visita rota")
+    def fail(self, node):
+        raise RuntimeError("broken visit")
 
-    monkeypatch.setattr(CodeQualityChecker, "visit", falla)
-    assert StaticCodeAnalyzer._analyze_with_ast(str(mod)) == [(0, "ERROR", "Error durante el análisis: visita rota")]
+    monkeypatch.setattr(CodeQualityChecker, "visit", fail)
+    assert StaticCodeAnalyzer._analyze_with_ast(str(mod)) == [(0, "ERROR", "Error during analysis: broken visit")]
 
 
-def test_analizar_un_archivo_con_bandit_devuelve_none_si_no_esta(tmp_path, monkeypatch):
+def test_analysing_a_file_with_bandit_returns_none_when_it_is_missing(tmp_path, monkeypatch):
     mod = tmp_path / "mod.py"
     mod.write_text("x = 1\n", encoding="utf-8")
     monkeypatch.setattr(StaticCodeAnalyzer, "bandit_command", staticmethod(lambda: None))
     assert StaticCodeAnalyzer._analyze_with_bandit(str(mod)) is None
 
 
-# --- Auditor de rendimiento y complejidad -----------------------------------------------------
+# --- Performance and complexity auditor ------------------------------------------------------
 
 def _perf(tmp_path, code):
     path = tmp_path / "perf.py"
@@ -116,43 +121,43 @@ def _perf(tmp_path, code):
     return [msg for _, _, _, msg in CodeMetricsCalculator.audit_performance(str(path))]
 
 
-@pytest.mark.parametrize("llamada, nombre", [
+@pytest.mark.parametrize("call, name", [
     ("requests.get(u)", "requests.get()"),
     ("urllib.request.urlopen(u)", "urllib.request.urlopen()"),
     ("open(u)", "open()"),
 ])
-def test_e_s_bloqueante_dentro_de_una_corrutina(tmp_path, llamada, nombre):
-    msgs = _perf(tmp_path, f"import requests, urllib.request\n\n\nasync def f(u):\n    return {llamada}\n")
-    assert any(nombre in m for m in msgs), msgs
+def test_blocking_io_inside_a_coroutine(tmp_path, call, name):
+    msgs = _perf(tmp_path, f"import requests, urllib.request\n\n\nasync def f(u):\n    return {call}\n")
+    assert any(name in m for m in msgs), msgs
 
 
-def test_concatenar_texto_en_un_bucle_detecta_variables_anotadas_y_f_strings(tmp_path):
+def test_string_concatenation_in_a_loop_detects_annotated_variables_and_f_strings(tmp_path):
     msgs = _perf(tmp_path, "def f(items):\n    out: str = ''\n    for i in items:\n        out += f'{i}'\n"
                            "    return out\n")
-    assert any("Concatenación incremental" in m for m in msgs), msgs
+    assert any("Incremental string concatenation" in m for m in msgs), msgs
 
 
-def test_re_compile_en_un_bucle_async_y_nombres_ligados_por_except_e_import(tmp_path):
+def test_re_compile_in_an_async_loop_and_names_bound_by_except_and_import(tmp_path):
     code = ("import re\n\n\nasync def f(rows):\n    async for row in rows:\n        try:\n            import json as pat\n"
-            "        except ValueError as pat:\n            pass\n        re.compile(pat)\n        re.compile('fijo')\n")
+            "        except ValueError as pat:\n            pass\n        re.compile(pat)\n        re.compile('fixed')\n")
     msgs = _perf(tmp_path, code)
     compiles = [m for m in msgs if "re.compile" in m]
-    # El patrón ligado en cada vuelta (por el import o el except) no se puede sacar; el literal sí.
+    # The pattern rebound on every iteration (by the import or the except) cannot be hoisted; the literal can.
     assert len(compiles) == 1, msgs
 
 
-def test_complejidad_de_un_bucle_async_for(tmp_path):
+def test_complexity_of_an_async_for_loop(tmp_path):
     path = tmp_path / "m.py"
     path.write_text("async def f(rows):\n    async for r in rows:\n        if r:\n            return r\n", encoding="utf-8")
     [(name, _, cyclomatic, cognitive)] = CodeMetricsCalculator.calculate_file_metrics(str(path))["function_details"]
     assert (name, cyclomatic, cognitive) == ("f", 3, 3)
 
 
-def test_metricas_y_rendimiento_de_archivos_que_no_se_pueden_leer(tmp_path):
+def test_metrics_and_performance_of_unreadable_files(tmp_path):
     missing = str(tmp_path / "no.py")
-    assert CodeMetricsCalculator.audit_performance(missing) == [(0, "N/A", "ERROR", f"El archivo '{missing}' no existe.")]
-    assert CodeMetricsCalculator.calculate_file_metrics(missing) == {"error": f"El archivo '{missing}' no existe."}
-    assert "No se pudo leer" in CodeMetricsCalculator.calculate_file_metrics(str(tmp_path))["error"]
-    broken = tmp_path / "roto.py"
+    assert CodeMetricsCalculator.audit_performance(missing) == [(0, "N/A", "ERROR", f"File '{missing}' does not exist.")]
+    assert CodeMetricsCalculator.calculate_file_metrics(missing) == {"error": f"File '{missing}' does not exist."}
+    assert "Could not read" in CodeMetricsCalculator.calculate_file_metrics(str(tmp_path))["error"]
+    broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
     assert CodeMetricsCalculator.audit_performance(str(broken))[0][:3] == (0, "AST", "ERROR")

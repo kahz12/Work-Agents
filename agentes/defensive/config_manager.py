@@ -5,85 +5,86 @@ from typing import Any, Dict, List, Optional, Tuple
 
 class ConfigManager:
     """
-    Módulo para carga segura de configuración y detección defensiva de
-    secretos o credenciales incrustadas (hardcoded) en código o configuraciones.
+    Safe configuration loading, plus detection of secrets and credentials hardcoded in source
+    code or configuration files.
     """
 
-    # Nombres de clave que sugieren un secreto. \w* al final para que
-    # 'aws_secret_access_key' entre por 'secret'. Para 'auth' exigimos fin de
-    # palabra o sufijo de credencial para no marcar 'AUTHENTIC' o 'AUTHOR'.
+    # Key names that suggest a secret. The trailing \w* lets 'aws_secret_access_key' match
+    # through 'secret'. 'auth' must end the word or carry a credential suffix, so that
+    # 'AUTHENTIC' or 'AUTHOR' are not flagged.
     _SECRET_KEY_NAMES = (
         r'(?:api[_-]?key|secret|password|passwd|passphrase|token'
         r'|auth(?:[_-]?(?:token|key|secret|code|header|pw|pass)\w*)?(?![A-Za-z0-9])'
         r'|credential|access[_-]?key|client[_-]?secret|private[_-]?key)\w*'
     )
 
-    # 'password_field_name' nombra un campo; no es donde vive un secreto.
-    _NOMBRA_UN_CAMPO_RE = re.compile(
+    # 'password_field_name' holds the name of a field, not a secret.
+    _NAMES_A_FIELD_RE = re.compile(
         r'(?i)_(?:name|names|field|fields|label|column|header|key_name|param|attr)$'
     )
 
-    # Expresión de descartes para valores que corresponden a plantillas de configuración,
-    # referencias a variables de entorno o rellenos ilustrativos de documentación.
+    # Values that are not real secrets: configuration templates, environment variable
+    # references and illustrative placeholders from documentation. Spanish placeholders
+    # (tu-, aqui, ejemplo) are listed because the tool is also used on Spanish codebases.
     _PLACEHOLDER_RE = re.compile(
         r"^(?:"
-        r"\s*"                                       # Cadena vacía o compuesta únicamente por espacios en blanco.
-        r"|[xX*.\-_]+"                               # Rellenos repetitivos usados para ocultar ejemplos (xxxx, ****, ----).
-        r"|<[^>]*>"                                  # Etiquetas delimitadoras de sustitución manual (<tu-password>).
-        r"|\{\{?[^}]*\}?\}"                          # Marcadores de interpolación de plantillas ({{var}}, {var}).
-        r"|%[sdrf]"                                  # Especificadores de formato posicional heredados estilo printf (%s).
-        r"|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"           # Referencias simbólicas a variables de entorno ($VAR, ${VAR}).
-        r"|(?:tu|your|my|the)[-_ ].*"                # Fórmulas posesivas habituales en archivos de ejemplo (your-secret-here).
+        r"\s*"                                       # Empty or whitespace only.
+        r"|[xX*.\-_]+"                               # Masking filler used in examples (xxxx, ****, ----).
+        r"|<[^>]*>"                                  # Manual substitution markers (<your-password>).
+        r"|\{\{?[^}]*\}?\}"                          # Template interpolation ({{var}}, {var}).
+        r"|%[sdrf]"                                  # printf-style format specifiers (%s).
+        r"|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"           # Environment variable references ($VAR, ${VAR}).
+        r"|(?:tu|your|my|the)[-_ ].*"                # Possessive phrasing typical of sample files (your-secret-here).
         r"|.*(?:aqui|here|placeholder|example|ejemplo|changeme|change[-_]me"
         r"|replace[-_]me|todo|tbd|dummy|sample|fake|redacted).*"
         r"|(?:none|null|nil|false|true|test|demo)"
-        r"|.{0,7}"                                   # Cadenas menores a ocho caracteres carecen de longitud mínima útil como secreto.
+        r"|.{0,7}"                                   # Shorter than eight characters: too short to be a real secret.
         r")$",
         re.IGNORECASE,
     )
 
     SECRET_PATTERNS = [
-        # --- Proveedores concretos: su prefijo propio hace que casi nunca se confundan con otra cosa ---
-        (r'\bAKIA[0-9A-Z]{16}\b', "Clave de acceso AWS (AKIA)"),
-        (r'\bASIA[0-9A-Z]{16}\b', "Clave de acceso temporal AWS (ASIA)"),
+        # --- Provider-specific tokens: their distinctive prefix makes false positives rare ---
+        (r'\bAKIA[0-9A-Z]{16}\b', "AWS access key (AKIA)"),
+        (r'\bASIA[0-9A-Z]{16}\b', "AWS temporary access key (ASIA)"),
         (r'(?i)aws[\w-]*(?:secret|private)[\w-]*\s*[:=]\s*["\'][A-Za-z0-9/+=]{40}["\']',
-         "Clave secreta de AWS"),
-        (r'\bgh[pousr]_[A-Za-z0-9]{36,}\b', "Token de GitHub"),
-        (r'\bgithub_pat_[A-Za-z0-9_]{22,}\b', "Token de GitHub (fine-grained)"),
-        (r'\bxox[baprs]-[A-Za-z0-9-]{10,}\b', "Token de Slack"),
-        (r'hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}', "Webhook de Slack"),
-        (r'\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b', "Clave de API de Stripe"),
-        (r'\bAIza[0-9A-Za-z_-]{35}\b', "Clave de API de Google"),
-        (r'\bsk-ant-[A-Za-z0-9_-]{20,}\b', "Clave de API de Anthropic"),
-        (r'\bsk-(?!ant-)[A-Za-z0-9_-]{20,}\b', "Clave de API de OpenAI"),
-        (r'\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b', "Clave de API de SendGrid"),
-        (r'\bnpm_[A-Za-z0-9]{36}\b', "Token de npm"),
-        (r'\bpypi-[A-Za-z0-9_-]{32,}\b', "Token de PyPI"),
-        (r'\bglpat-[A-Za-z0-9_-]{20,}\b', "Token de GitLab"),
+         "AWS secret key"),
+        (r'\bgh[pousr]_[A-Za-z0-9]{36,}\b', "GitHub token"),
+        (r'\bgithub_pat_[A-Za-z0-9_]{22,}\b', "GitHub token (fine-grained)"),
+        (r'\bxox[baprs]-[A-Za-z0-9-]{10,}\b', "Slack token"),
+        (r'hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}', "Slack webhook"),
+        (r'\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b', "Stripe API key"),
+        (r'\bAIza[0-9A-Za-z_-]{35}\b', "Google API key"),
+        (r'\bsk-ant-[A-Za-z0-9_-]{20,}\b', "Anthropic API key"),
+        (r'\bsk-(?!ant-)[A-Za-z0-9_-]{20,}\b', "OpenAI API key"),
+        (r'\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b', "SendGrid API key"),
+        (r'\bnpm_[A-Za-z0-9]{36}\b', "npm token"),
+        (r'\bpypi-[A-Za-z0-9_-]{32,}\b', "PyPI token"),
+        (r'\bglpat-[A-Za-z0-9_-]{20,}\b', "GitLab token"),
 
-        # --- Firmas estructurales inequívocas: su sintaxis delata el secreto sin depender
-        # del nombre de variable ni pasar por el filtro heurístico de descartes ---
-        (r'-----BEGIN\s+(?:[A-Z]+\s+)?PRIVATE KEY-----', "Clave privada incrustada (PEM)"),
+        # --- Unambiguous structural signatures: the syntax alone gives the secret away, so
+        # they do not depend on the variable name and skip the placeholder filter ---
+        (r'-----BEGIN\s+(?:[A-Z]+\s+)?PRIVATE KEY-----', "Embedded private key (PEM)"),
         (r'\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b', "JSON Web Token (JWT)"),
-        (r'([a-zA-Z0-9_-]{24}\.[a-zA-Z0-9_-]{6}\.[a-zA-Z0-9_-]{27})', "Posible token tipo Discord"),
+        (r'([a-zA-Z0-9_-]{24}\.[a-zA-Z0-9_-]{6}\.[a-zA-Z0-9_-]{27})', "Possible Discord-style token"),
         (r'(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|ftp)://[^:@/\s]+:[^@/\s]+@',
-         "Credencial dentro de una URL de conexion"),
+         "Credential inside a connection URL"),
         (r'(?i)(?:proxy-)?authorization\s*["\']?\s*[:=]\s*["\']\s*(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]{16,}',
-         "Credencial en cabecera Authorization"),
+         "Credential in an Authorization header"),
 
-        # --- Genéricos por nombre de clave: se separan claves con comillas dobles,
-        # simples y sin comillas para evitar saltos entre comillas en llamadas UI
-        # como Label("Password:", classes="field-label") ---
+        # --- Generic, keyed by name. Double-quoted, single-quoted and bare keys use separate
+        # patterns so a match cannot jump across quotes in UI calls such as
+        # Label("Password:", classes="field-label") ---
         (r'(?i)"([A-Za-z0-9_-]*' + _SECRET_KEY_NAMES + r')"\s*:\s*["\']([^"\'\r\n]+)["\']',
-         "Posible secreto incrustado"),
+         "Possible embedded secret"),
         (r"(?i)'([A-Za-z0-9_-]*" + _SECRET_KEY_NAMES + r")'\s*:\s*[\"']([^\"'\r\n]+)[\"']",
-         "Posible secreto incrustado"),
+         "Possible embedded secret"),
         (r'(?i)(?:^|(?<=[\s,({\[;.]))([A-Za-z0-9_-]*' + _SECRET_KEY_NAMES + r')(?:\s*:\s+|\s*=\s*)["\']([^"\'\r\n]+)["\']',
-         "Posible secreto incrustado"),
+         "Possible embedded secret"),
     ]
 
-    # El filtro de descartes y valores de prueba solo aplica sobre los patrones genéricos
-    # al final de la tupla: los de proveedor específico ya son inequívocos por su prefijo.
+    # The placeholder filter only applies to the generic patterns at the end of the list;
+    # provider-specific patterns are already unambiguous thanks to their prefix.
     _GENERIC_PATTERN_START = len(SECRET_PATTERNS) - 3
     _COMPILED_SECRET_PATTERNS = [(re.compile(pat), desc) for pat, desc in SECRET_PATTERNS]
 
@@ -96,7 +97,9 @@ class ConfigManager:
     @staticmethod
     def parse_env_file(filepath: str) -> Dict[str, str]:
         """
-        Lee y valida variables desde un archivo .env sin modificar os.environ.
+        Read and validate the variables in a .env file without touching os.environ.
+        Invalid names and variables that could hijack the interpreter (PATH, LD_PRELOAD...)
+        are skipped.
         """
         env_vars: Dict[str, str] = {}
         try:
@@ -121,8 +124,9 @@ class ConfigManager:
     @staticmethod
     def load_env_file(filepath: str, *, override: bool = False) -> Dict[str, str]:
         """
-        Lee un archivo .env y exporta sus variables a os.environ. Las que ya existen en el
-        entorno se respetan salvo con override=True. Devuelve todas las leídas del archivo.
+        Read a .env file and export its variables to os.environ. Variables already present in
+        the environment are left alone unless override=True. Returns everything read from the
+        file.
         """
         env_vars = ConfigManager.parse_env_file(filepath)
         for key, val in env_vars.items():
@@ -133,8 +137,8 @@ class ConfigManager:
     @staticmethod
     def audit_config_dict(config: Dict[str, Any]) -> List[Tuple[str, str, str]]:
         """
-        Audita un diccionario de configuración buscando valores inseguros o claves débiles.
-        Retorna una lista de tuplas: (Clave, Nivel_Riesgo, Recomendación).
+        Look for insecure values and weak keys in a configuration mapping.
+        Returns a list of (key, risk level, recommendation) tuples.
         """
         findings = []
 
@@ -142,23 +146,23 @@ class ConfigManager:
             key_lower = str(key).lower()
             str_val = str(value)
 
-            # Evaluar claves con semántica de credencial cuyo valor sea trivial, predeterminado o excesivamente corto.
-            # Un valor vacío significa "sin definir" (lo normal en una plantilla), no una clave corta.
+            # Credential-like keys whose value is trivial, a well-known default, or too short.
+            # An empty value means "not set" (normal in a template), not a short key.
             if any(k in key_lower for k in ['secret', 'key', 'token', 'password']) and str_val.strip():
                 if str_val.lower() in ['admin', '123456', 'secret', 'changeme', 'default', 'root']:
-                    findings.append((key, "ALTO", f"El valor de '{key}' es inseguro o predeterminado ('{str_val}'). Usa variables de entorno."))
+                    findings.append((key, "HIGH", f"The value of '{key}' is insecure or a known default ('{str_val}'). Use environment variables."))
                 elif len(str_val) < 16:
-                    findings.append((key, "MEDIO", f"La clave o secreto '{key}' es corta ({len(str_val)} caracteres). Se recomiendan al menos 32 caracteres estocásticos."))
+                    findings.append((key, "MEDIUM", f"The key or secret '{key}' is short ({len(str_val)} characters). Use at least 32 random characters."))
 
-            # Alertar indicadores de depuración o pruebas habilitados en configuraciones productivas.
+            # Debug or testing switches turned on, which must be off in production.
             if key_lower in ['debug', 'testing'] and str_val.lower() in ['true', '1', 'yes']:
-                findings.append((key, "ALTO", f"La opción '{key}' está activada. En producción debe estar desactivada."))
+                findings.append((key, "HIGH", f"The '{key}' option is enabled. It must be disabled in production."))
 
         return findings
 
     @staticmethod
     def _redact_line(line: str, match: re.Match, is_generic: bool) -> str:
-        """Reemplaza el valor secreto detectado por una versión redactada antes de truncar."""
+        """Mask the detected secret in the line, then truncate the line for display."""
         raw = line.rstrip("\r\n")
         if is_generic and match.lastindex and match.lastindex >= 2:
             val = match.group(2)
@@ -180,8 +184,8 @@ class ConfigManager:
         return stripped[:60] + "..." if len(stripped) > 60 else stripped
 
     @staticmethod
-    def _es_archivo_test(filepath: str) -> bool:
-        """Detecta archivos de prueba por su nombre base (no por carpetas padre)."""
+    def _is_test_file(filepath: str) -> bool:
+        """Recognise test files by their base name only; parent directories do not count."""
         name = filepath.replace("\\", "/").rsplit("/", 1)[-1].lower()
         return name == "conftest.py" or (
             name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
@@ -189,8 +193,12 @@ class ConfigManager:
 
     @staticmethod
     def _match_secret_line(line: str, *, is_test_file: bool) -> Optional[Tuple[str, str]]:
-        """Evalúa una línea buscando secretos; los de prefijo inequívoco también cuentan en comentarios."""
-        is_comment = ConfigManager._es_comentario(line)
+        """
+        Look for a secret in one line and return (description, masked line), or None.
+        Provider-specific matches count even inside comments; generic key-name matches are
+        ignored in comments and test files, where sample credentials are expected.
+        """
+        is_comment = ConfigManager._is_comment(line)
         for pos, (pattern, desc) in enumerate(ConfigManager._COMPILED_SECRET_PATTERNS):
             match = pattern.search(line)
             if not match:
@@ -199,11 +207,11 @@ class ConfigManager:
             if is_generic:
                 if is_comment or is_test_file:
                     continue
-                clave, valor = match.group(1), match.group(2)
+                key, value = match.group(1), match.group(2)
                 if (
-                    clave.lower() == valor.strip().lower()
-                    or ConfigManager._PLACEHOLDER_RE.match(valor)
-                    or ConfigManager._NOMBRA_UN_CAMPO_RE.search(clave)
+                    key.lower() == value.strip().lower()
+                    or ConfigManager._PLACEHOLDER_RE.match(value)
+                    or ConfigManager._NAMES_A_FIELD_RE.search(key)
                 ):
                     continue
             return desc, ConfigManager._redact_line(line, match, is_generic)
@@ -212,11 +220,12 @@ class ConfigManager:
     @staticmethod
     def scan_file_for_secrets(filepath: str) -> List[Tuple[int, str, str]]:
         """
-        Escanea defensivamente un archivo en busca de patrones de claves incrustadas.
-        Retorna lista de (Número_Linea, Patrón_Detectado, Fragmento).
+        Scan a file for embedded keys and credentials.
+        Returns a list of (line number, detected pattern, masked snippet). Line 0 marks a file
+        that could not be read.
         """
         findings: List[Tuple[int, str, str]] = []
-        is_test_file = ConfigManager._es_archivo_test(filepath)
+        is_test_file = ConfigManager._is_test_file(filepath)
         try:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 for idx, line in enumerate(f, 1):
@@ -225,19 +234,19 @@ class ConfigManager:
                         desc, masked_line = hit
                         findings.append((idx, desc, masked_line))
         except FileNotFoundError:
-            return [(0, "ERROR de lectura", f"El archivo '{filepath}' no existe.")]
+            return [(0, "Read error", f"File '{filepath}' does not exist.")]
         except OSError as exc:
-            # Un archivo ilegible por permisos o codificación no debe devolver una lista vacía,
-            # porque quien llama lo interpretaría como un archivo revisado y sin secretos.
-            findings.append((0, "ERROR de lectura", str(exc)))
+            # A file unreadable because of permissions or encoding must not produce an empty
+            # list: the caller would take that as "scanned and clean".
+            findings.append((0, "Read error", str(exc)))
 
         return findings
 
-    # Prefijos de comentario habituales en los formatos de configuración y código fuente
-    # soportados (.py, .sh, .yml, .ini, .sql, .js, .c). El marcador '--' exige al menos un
-    # espacio posterior para no confundir encabezados PEM ('-----BEGIN ... PRIVATE KEY-----').
-    _COMENTARIO_RE = re.compile(r'^\s*(?:#|//|--\s|;|/\*|\*\s)')
+    # Comment prefixes of the supported source and configuration formats (.py, .sh, .yml,
+    # .ini, .sql, .js, .c). '--' must be followed by whitespace so that PEM armour lines
+    # ('-----BEGIN ... PRIVATE KEY-----') are not mistaken for comments.
+    _COMMENT_RE = re.compile(r'^\s*(?:#|//|--\s|;|/\*|\*\s)')
 
     @staticmethod
-    def _es_comentario(line: str) -> bool:
-        return bool(ConfigManager._COMENTARIO_RE.match(line))
+    def _is_comment(line: str) -> bool:
+        return bool(ConfigManager._COMMENT_RE.match(line))

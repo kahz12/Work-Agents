@@ -12,13 +12,13 @@ from .. import __version__
 
 class SystemHealthChecker:
     """
-    Inspector SRE de sondas de salud (Liveness / Readiness) con checks reales:
-    disco, carga, TCP y HTTP opcionales.
+    Liveness/readiness probes that check real resources: disk and load always, plus an
+    optional TCP port and HTTP URL.
     """
 
     @staticmethod
     def check_disk(path: str = "/", min_free_mb: float = 100.0) -> Dict[str, Any]:
-        """Espacio libre en path. Una ruta que no existe o no se puede consultar es una sonda fallida."""
+        """Free space at path. A path that does not exist or cannot be queried is a failed probe."""
         try:
             usage = shutil.disk_usage(path)
         except OSError as exc:
@@ -27,10 +27,11 @@ class SystemHealthChecker:
                 "ok": False,
                 "path": path,
                 "min_free_mb": min_free_mb,
-                "detail": f"No se pudo consultar el disco en '{path}': {exc.strerror or exc}",
+                "detail": f"Could not query the disk at '{path}': {exc.strerror or exc}",
             }
         effective_path = path
-        # En contenedores con / de solo lectura o Termux, '/' reporta 0 libre; consultar '.' si tiene espacio.
+        # In containers with a read-only root, and on Termux, '/' reports 0 bytes free even though
+        # the working directory has space; fall back to '.' in that case.
         if path == "/" and usage.free == 0:
             cwd_path = os.path.abspath(".")
             cwd_usage = shutil.disk_usage(cwd_path)
@@ -46,11 +47,12 @@ class SystemHealthChecker:
             "free_mb": round(free_mb, 2),
             "total_mb": round(usage.total / (1024 * 1024), 2),
             "min_free_mb": min_free_mb,
-            "detail": "OK" if ok else f"Espacio libre {free_mb:.1f}MB < {min_free_mb}MB",
+            "detail": "OK" if ok else f"Free space {free_mb:.1f}MB < {min_free_mb}MB",
         }
 
     @staticmethod
     def check_tcp(host: str, port: int, timeout: float = 2.0) -> Dict[str, Any]:
+        """Open (and immediately close) a TCP connection and report whether it succeeded, with latency."""
         start = time.time()
         try:
             with socket.create_connection((host, port), timeout=timeout):
@@ -60,7 +62,7 @@ class SystemHealthChecker:
                 "ok": True,
                 "target": f"{host}:{port}",
                 "latency_ms": latency_ms,
-                "detail": "Conexión TCP OK",
+                "detail": "TCP connection OK",
             }
         except OSError as exc:
             return {
@@ -68,15 +70,15 @@ class SystemHealthChecker:
                 "ok": False,
                 "target": f"{host}:{port}",
                 "latency_ms": round((time.time() - start) * 1000, 2),
-                "detail": f"TCP falló: {exc}",
+                "detail": f"TCP failed: {exc}",
             }
 
     @staticmethod
     def check_http(url: str, timeout: float = 3.0, expect_status: int = 200) -> Dict[str, Any]:
         """
-        GET a url y compara el código con expect_status. Un 4xx o un 5xx es una respuesta, no una
-        caída: si es el código esperado (una sonda que exige 503 en mantenimiento, por ejemplo),
-        la sonda pasa. Solo falla sin código cuando no hay respuesta.
+        GET url and compare the status code with expect_status. A 4xx or 5xx is still a response,
+        not an outage: when it is the expected code (a probe that requires 503 during maintenance,
+        for example) the probe passes. status_code is None only when there was no response at all.
         """
         start = time.time()
         try:
@@ -106,7 +108,7 @@ class SystemHealthChecker:
                 "url": url,
                 "status_code": None,
                 "latency_ms": round((time.time() - start) * 1000, 2),
-                "detail": f"HTTP falló: {exc}",
+                "detail": f"HTTP failed: {exc}",
             }
 
     @staticmethod
@@ -120,10 +122,10 @@ class SystemHealthChecker:
         http_expect_status: int = 200,
     ) -> Dict[str, Any]:
         """
-        Agrega sondas de salud. Status:
-          HEALTHY   — todas las sondas pasan
-          DEGRADED  — falla alguna sonda externa (TCP o HTTP), pero el disco está bien
-          UNHEALTHY — falla la sonda de disco, que es la base
+        Run the probes and aggregate them. Status:
+          HEALTHY   — every probe passes
+          DEGRADED  — an external probe (TCP or HTTP) fails, but the disk is fine
+          UNHEALTHY — the disk probe, which everything else depends on, fails
         """
         start_time = time.time()
         checks: List[Dict[str, Any]] = []

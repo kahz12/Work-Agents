@@ -1,5 +1,5 @@
 """
-Auditoría AST de testabilidad arquitectónica: dependencias, estado global, E/S y determinismo.
+AST audit of architectural testability: hardcoded dependencies, global state, I/O and determinism.
 """
 from __future__ import annotations
 
@@ -31,8 +31,9 @@ _COLLABORATOR_WORD_HINTS = frozenset({
 _COLLABORATOR_BRAND_HINTS = ("OpenAI", "Anthropic", "Gemini")
 
 
-def _es_clase_colaborador(cls_name: str) -> bool:
-    """Devuelve True solo si el nombre sugiere un cliente/servicio/repositorio externo."""
+def _is_collaborator_class(cls_name: str) -> bool:
+    """True only when the class name suggests an external client, service or repository."""
+    # Split CamelCase into words, keeping acronyms together: "HTTPClient" -> ["HTTP", "Client"].
     if any(brand in cls_name for brand in _COLLABORATOR_BRAND_HINTS):
         return True
     words = re.findall(r"[A-Z]+(?=[A-Z][a-z0-9]|$)|[A-Z][a-z0-9]*", cls_name)
@@ -40,20 +41,20 @@ def _es_clase_colaborador(cls_name: str) -> bool:
 
 
 def _is_hardcoded_collaborator(cls_name: str, local_names: Set[str]) -> bool:
-    """Una clase colaboradora (cliente, repositorio...) instanciada dentro en vez de recibida."""
+    """A collaborator class (client, repository...) instantiated inside the function instead of being passed in."""
     return (
         cls_name[0:1].isupper()
         and cls_name not in _STD_TYPES_OR_EXCS
         and not cls_name.endswith(("Error", "Exception", "Warning"))
         and cls_name not in local_names
-        and _es_clase_colaborador(cls_name)
+        and _is_collaborator_class(cls_name)
     )
 
 
 class TestabilityAuditor(ast.NodeVisitor):
     """
-    Auditor AST de testabilidad arquitectónica: identifica acoplamiento directo
-    a colaboradores externos, estado global mutable, I/O mezclado con lógica y no-determinismo.
+    AST testability audit: direct coupling to external collaborators, mutable global state,
+    I/O mixed with business logic, and non-determinism. Findings are (line, code, level, message).
     """
 
     def __init__(self, tree: ast.Module, module: str = "") -> None:
@@ -68,7 +69,7 @@ class TestabilityAuditor(ast.NodeVisitor):
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 self._module_vars.add(node.target.id)
 
-    # Nodos que indican lógica de negocio (decisiones, bucles, operaciones) frente a mera delegación.
+    # Nodes that signal business logic (decisions, loops, computation) as opposed to plain delegation.
     _LOGIC_NODES = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.BinOp, ast.Compare, ast.Raise)
     _MUTATING_METHODS = frozenset({"append", "extend", "update", "pop", "clear", "add", "remove"})
 
@@ -78,7 +79,7 @@ class TestabilityAuditor(ast.NodeVisitor):
         io_hits: List[Tuple[int, str]] = []
         stack: List[ast.AST] = list(node.body)
 
-        # Recorre el cuerpo sin entrar en funciones ni clases anidadas: tienen su propia auditoría.
+        # Walk the body without entering nested functions or classes; they are audited on their own.
         while stack:
             curr = stack.pop()
             if isinstance(curr, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -90,9 +91,9 @@ class TestabilityAuditor(ast.NodeVisitor):
         if io_hits and has_logic:
             lineno, chain = io_hits[0]
             self._add(
-                lineno, "MIXED-IO", "ALTO",
-                f"La funcion '{node.name}' mezcla logica de negocio con I/O directo ('{chain}'). "
-                "Separa la logica pura del adaptador de I/O.",
+                lineno, "MIXED-IO", "HIGH",
+                f"Function '{node.name}' mixes business logic with direct I/O ('{chain}'). "
+                "Separate the pure logic from the I/O adapter.",
             )
 
         self.generic_visit(node)
@@ -103,8 +104,8 @@ class TestabilityAuditor(ast.NodeVisitor):
     def _audit_node(self, curr: ast.AST, func_name: str, local_names: Set[str], io_hits: List[Tuple[int, str]]) -> None:
         if isinstance(curr, ast.Global):
             self._add(
-                curr.lineno, "GLOBAL-STATE", "ALTO",
-                f"La funcion '{func_name}' usa 'global {', '.join(curr.names)}', acoplando pruebas al orden de ejecucion.",
+                curr.lineno, "GLOBAL-STATE", "HIGH",
+                f"Function '{func_name}' uses 'global {', '.join(curr.names)}', which couples tests to execution order.",
             )
         elif isinstance(curr, ast.Assign):
             self._audit_global_item_assignment(curr, func_name, local_names)
@@ -112,16 +113,16 @@ class TestabilityAuditor(ast.NodeVisitor):
             self._audit_call(curr, func_name, local_names, io_hits)
         elif isinstance(curr, ast.Subscript) and _attr_chain(curr.value) == "os.environ":
             self._add(
-                curr.lineno, "NON-DETERMINISTIC", "MEDIO",
-                f"Lectura directa de os.environ en '{func_name}'. Usa monkeypatch en tests o inyecta configuracion.",
+                curr.lineno, "NON-DETERMINISTIC", "MEDIUM",
+                f"Direct read of os.environ in '{func_name}'. Use monkeypatch in tests or inject the configuration.",
             )
 
     def _is_module_var(self, name: str, local_names: Set[str]) -> bool:
-        """Variable del módulo que la función no recibe ni ensombrece con un parámetro."""
+        """A module-level variable that the function neither receives nor shadows with a parameter."""
         return name in self._module_vars and name not in local_names
 
     def _audit_global_item_assignment(self, curr: ast.Assign, func_name: str, local_names: Set[str]) -> None:
-        """CACHE[k] = v sobre una variable del módulo."""
+        """CACHE[k] = v on a module-level variable."""
         for tgt in curr.targets:
             if (
                 isinstance(tgt, ast.Subscript)
@@ -129,8 +130,8 @@ class TestabilityAuditor(ast.NodeVisitor):
                 and self._is_module_var(tgt.value.id, local_names)
             ):
                 self._add(
-                    curr.lineno, "GLOBAL-STATE", "ALTO",
-                    f"Mutacion de estado global '{tgt.value.id}[...]' dentro de '{func_name}'. Inyecta estado explicito.",
+                    curr.lineno, "GLOBAL-STATE", "HIGH",
+                    f"Global state mutation '{tgt.value.id}[...]' inside '{func_name}'. Pass the state in explicitly.",
                 )
 
     def _audit_call(self, curr: ast.Call, func_name: str, local_names: Set[str], io_hits: List[Tuple[int, str]]) -> None:
@@ -142,8 +143,8 @@ class TestabilityAuditor(ast.NodeVisitor):
             and self._is_module_var(func.value.id, local_names)
         ):
             self._add(
-                curr.lineno, "GLOBAL-STATE", "ALTO",
-                f"Mutacion de coleccion global '{func.value.id}.{func.attr}()' dentro de '{func_name}'.",
+                curr.lineno, "GLOBAL-STATE", "HIGH",
+                f"Global collection mutation '{func.value.id}.{func.attr}()' inside '{func_name}'.",
             )
         chain = _attr_chain(func)
         hit = classify(curr, self.imports)
@@ -151,14 +152,14 @@ class TestabilityAuditor(ast.NodeVisitor):
             io_hits.append((curr.lineno, hit[0]))
         elif chain in NON_DET_CALLS:
             self._add(
-                curr.lineno, "NON-DETERMINISTIC", "MEDIO",
-                f"Llamada no determinista '{chain}()' en '{func_name}'. Inyecta reloj/generador o parametrizalo.",
+                curr.lineno, "NON-DETERMINISTIC", "MEDIUM",
+                f"Non-deterministic call '{chain}()' in '{func_name}'. Inject the clock/generator or make it a parameter.",
             )
         elif isinstance(func, ast.Name) and _is_hardcoded_collaborator(func.id, local_names):
             self._add(
-                curr.lineno, "HARDCODED-DEP", "MEDIO",
-                f"Dependencia hardcodeada '{func.id}()' dentro de '{func_name}'. "
-                "Usa inyeccion de dependencias para mockear con spec/autospec.",
+                curr.lineno, "HARDCODED-DEP", "MEDIUM",
+                f"Hardcoded dependency '{func.id}()' inside '{func_name}'. "
+                "Use dependency injection so tests can mock it with spec/autospec.",
             )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -170,16 +171,16 @@ class TestabilityAuditor(ast.NodeVisitor):
 
 def audit_testability(source_filepath: str) -> List[Tuple[int, str, str, str]]:
     """
-    Audita el código fuente mediante AST en busca de impedimentos de testabilidad
-    (acoplamiento concreto, estado global mutable, I/O directo y no-determinismo).
-    Retorna una lista de tuplas (línea, código, nivel, mensaje).
+    Look for testability blockers in a source file through its AST: concrete coupling, mutable
+    global state, direct I/O and non-determinism.
+    Returns a list of (line, code, level, message) tuples.
     """
     try:
         tree = read_and_parse(source_filepath)
     except FileNotFoundError:
-        return [(0, "N/A", "ERROR", f"Archivo '{source_filepath}' no encontrado.")]
+        return [(0, "N/A", "ERROR", f"File '{source_filepath}' not found.")]
     except (IsADirectoryError, PermissionError, OSError, SyntaxError, UnicodeDecodeError) as e:
-        return [(0, "AST", "ERROR", f"Error analizando testabilidad: {e}")]
+        return [(0, "AST", "ERROR", f"Testability analysis error: {e}")]
 
     auditor = TestabilityAuditor(tree, os.path.splitext(os.path.basename(source_filepath))[0])
     auditor.visit(tree)

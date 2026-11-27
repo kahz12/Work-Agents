@@ -4,13 +4,14 @@ import os
 
 class MarkdownDocGenerator:
     """
-    Generador automatizado de documentación técnica en Markdown para proyectos de software.
+    Builds a Markdown reference manual from a Python module's docstrings, without importing it.
     """
 
     @staticmethod
     def generate_module_docs(source_filepath: str, output_filepath: str) -> str:
         """
-        Analiza un archivo Python y produce un manual de referencia en Markdown.
+        Write a Markdown reference for the classes, methods and top-level functions of a
+        Python file. Returns the output path, or "" when the source file does not exist.
         """
         if not os.path.exists(source_filepath):
             return ""
@@ -20,50 +21,50 @@ class MarkdownDocGenerator:
 
         filename = os.path.basename(source_filepath)
         tree = ast.parse(content, filename=source_filepath)
-        module_doc = ast.get_docstring(tree) or "Sin documentación de módulo."
+        module_doc = ast.get_docstring(tree) or "No module documentation."
 
         lines = [
-            f"# Documentación Técnica: `{filename}`",
+            f"# Technical Documentation: `{filename}`",
             "",
-            "## Descripción General",
+            "## Overview",
             module_doc,
             "",
-            "## Clases y Métodos",
+            "## Classes and Methods",
         ]
 
         classes_found = False
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 classes_found = True
-                c_doc = ast.get_docstring(node) or "Sin descripción."
-                lines.append(f"### Clase `class {node.name}`")
+                c_doc = ast.get_docstring(node) or "No description."
+                lines.append(f"### Class `class {node.name}`")
                 lines.append(f"> {c_doc}")
                 lines.append("")
-                lines.append("#### Métodos:")
+                lines.append("#### Methods:")
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        m_doc = ast.get_docstring(item) or "Sin docstring."
+                        m_doc = ast.get_docstring(item) or "No docstring."
                         args = [a.arg for a in item.args.args]
                         lines.append(f"- **`{item.name}({', '.join(args)})`**: {m_doc}")
                 lines.append("")
 
         if not classes_found:
-            lines.append("*No se detectaron clases en este archivo.*")
+            lines.append("*No classes found in this file.*")
 
         lines.extend([
-            "## Funciones Globales",
+            "## Module-Level Functions",
         ])
 
         funcs_found = False
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 funcs_found = True
-                f_doc = ast.get_docstring(node) or "Sin docstring."
+                f_doc = ast.get_docstring(node) or "No docstring."
                 args = [a.arg for a in node.args.args]
                 lines.append(f"- **`{node.name}({', '.join(args)})`**: {f_doc}")
 
         if not funcs_found:
-            lines.append("*No se detectaron funciones globales.*")
+            lines.append("*No module-level functions found.*")
 
         doc_str = "\n".join(lines)
         os.makedirs(os.path.dirname(os.path.abspath(output_filepath)), exist_ok=True)

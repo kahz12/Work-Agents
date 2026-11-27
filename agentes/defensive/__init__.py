@@ -1,1 +1,1 @@
-"""Agente defensive: sanitización de entrada, hashing de contraseñas, CSRF, RBAC y auditoría de configuración."""
+"""Defensive agent: input sanitisation, password hashing, CSRF, RBAC and configuration auditing."""

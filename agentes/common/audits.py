@@ -1,8 +1,8 @@
 """
-Auditorías unitarias que devuelven Finding.
+Single-target audits that return Finding objects.
 
-Es la única capa que conoce la forma de tupla de cada auditor. El orquestador y el CLI
-usan estas funciones en lugar de adaptar cada resultado por su cuenta.
+This is the only layer that knows the tuple shape each auditor returns. The orchestrator and
+the CLI call these functions instead of adapting every auditor's output themselves.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 
 from .findings import SILENT_LEVELS, Finding, normalize_level, severity_rank
 
-# Tipos de archivo que sabe auditar audit_file, en el orden en que se muestran.
+# File kinds audit_file understands, in the order they are listed to the user.
 AUDIT_KINDS = ["docker", "systemd", "deps", "yaml", "env", "logs", "tests"]
 INFRA_KINDS = frozenset({"docker", "systemd", "deps", "yaml"})
 
@@ -22,12 +22,12 @@ def _keep(level: object) -> bool:
 
 
 def _line_from_message(msg: str, default: int = 0) -> int:
-    match = re.search(r"L[ií]nea\s+(\d+)", msg, re.IGNORECASE)
+    match = re.search(r"Line\s+(\d+)", msg, re.IGNORECASE)
     return int(match.group(1)) if match else default
 
 
 def detect_kind(path: str) -> Optional[str]:
-    """Deduce el tipo de auditoría por el nombre del archivo. None si no lo reconoce."""
+    """Infer the audit kind from the file name. None when the name is not recognised."""
     fn = os.path.basename(path)
     low = fn.lower()
     if fn == "Dockerfile" or fn.startswith("Dockerfile.") or low.endswith(".dockerfile"):
@@ -47,7 +47,7 @@ def detect_kind(path: str) -> Optional[str]:
     return None
 
 
-# --- Infraestructura ------------------------------------------------------
+# --- Infrastructure ------------------------------------------------------
 
 def audit_dockerfile(path: str) -> List[Finding]:
     from ..hardening.container_hardening import ContainerHardening
@@ -71,13 +71,13 @@ def audit_dependencies(path: str) -> List[Finding]:
 
 
 def audit_yaml(path: str) -> List[Finding]:
-    """Sintaxis YAML y, en manifiestos de Pod, el contexto de seguridad."""
+    """YAML syntax and, for Pod-bearing Kubernetes manifests, the security context."""
     from ..devops.yaml_validator import YAMLValidator
     from ..hardening.k8s_hardening import K8sHardening
 
     docs, errors = YAMLValidator.load_documents(path)
     if docs is None:
-        return [Finding(path, _line_from_message(err), "ALTO", err, "YAML") for err in errors]
+        return [Finding(path, _line_from_message(err), "HIGH", err, "YAML") for err in errors]
     findings: List[Finding] = []
     for doc in docs:
         if isinstance(doc, dict) and doc.get("kind") in K8sHardening.WORKLOAD_KINDS:
@@ -88,24 +88,24 @@ def audit_yaml(path: str) -> List[Finding]:
     return findings
 
 
-# --- Configuración, logs y tests ------------------------------------------
+# --- Configuration, logs and tests ---------------------------------------
 
 _TEMPLATE_HINTS = ("example", "sample", "template", "dist", "tpl", "defaults")
 
 
 def is_env_template(path: str) -> bool:
-    """`.env.example`, `.env.sample`, `example.env`...: plantillas que documentan variables, no las definen."""
+    """`.env.example`, `.env.sample`, `example.env`...: templates that document variables rather than set them."""
     name = os.path.basename(path).lower()
     return any(hint in name for hint in _TEMPLATE_HINTS)
 
 
 def audit_env(path: str) -> List[Finding]:
     """
-    Opciones inseguras de un .env. Lee el archivo sin exportar nada al entorno.
+    Insecure settings in a .env file. The file is parsed without exporting anything.
 
-    En una plantilla los valores de ejemplo (vacíos o "changeme") son lo correcto: solo se
-    informa, como BAJO, de las opciones de depuración activadas por defecto. Los secretos
-    reales que alguien deje en una plantilla los detecta `secrets`.
+    In a template, sample values (empty or "changeme") are exactly what should be there, so
+    only debug switches that are on by default are reported, as LOW. Real secrets left in a
+    template are caught by the `secrets` scan instead.
     """
     from ..defensive.config_manager import ConfigManager
 
@@ -115,7 +115,7 @@ def audit_env(path: str) -> List[Finding]:
     if not is_env_template(path):
         return findings
     debug_keys = ("[DEBUG]", "[TESTING]")
-    return [Finding(f.file, f.line, "BAJO", f.message + " En una plantilla, mejor desactivada por defecto.", f.rule_id)
+    return [Finding(f.file, f.line, "LOW", f.message + " In a template, prefer it disabled by default.", f.rule_id)
             for f in findings if f.message.upper().startswith(debug_keys)]
 
 
@@ -152,28 +152,28 @@ _AUDITORS: Dict[str, Callable[[str], List[Finding]]] = {
 
 
 def audit_file(path: str, kind: Optional[str] = None) -> List[Finding]:
-    """Audita un archivo. Sin kind, lo deduce del nombre; ValueError si no puede."""
+    """Audit one file. Without kind, it is inferred from the name; ValueError when that fails."""
     kind = kind or detect_kind(path)
     if kind not in _AUDITORS:
-        raise ValueError(f"Tipo de auditoría no reconocido para {path}: {kind!r}")
+        raise ValueError(f"Unrecognised audit kind for {path}: {kind!r}")
     return _AUDITORS[kind](path)
 
 
-# --- Código Python --------------------------------------------------------
-
-# --- Calibración y fusión ------------------------------------------------------
+# --- Python code: calibration and merging --------------------------------
 #
-# Bandit, el motor AST propio y el auditor SOLID pueden señalar lo mismo en la misma línea: un
-# `except Exception: pass` lo detectan los tres, y dos de ellos como ALTO. Aquí se agrupan por
-# tema y se deja un único hallazgo, con una severidad calibrada para ese tema.
+# Bandit, our AST engine and the SOLID auditor can all report the same problem on the same
+# line: an `except Exception: pass` is caught by all three, two of them as HIGH. Findings are
+# grouped here by topic and collapsed into one, with a severity calibrated for that topic.
+# The patterns match the messages written by quality.static_checker, refactor.solid_checker,
+# refactor.code_metrics and Bandit; rewording one of those messages means updating this table.
 
 _TOPICS = [
-    ("exception-swallow", re.compile(r"Try, Except, (Pass|Continue)|silencia|Captura amplia retorna None", re.I)),
-    ("broad-except", re.compile(r"Uso de 'except Exception:'|except Exception\b.*concretas", re.I)),
-    ("bare-except", re.compile(r"except:'\s*(?:gen[eé]rico|desnuda)", re.I)),
-    ("mutable-default", re.compile(r"(?:argumento|par[aá]metro)\s+por\s+defecto\s+mutable", re.I)),
-    ("blocking-async", re.compile(r"bloqueante.*async\s+def|async\s+def.*event\s+loop|congela\s+el\s+Event\s+Loop", re.I)),
-    ("weak-hash", re.compile(r"\b(md5|sha1)\b|hash criptogr[aá]fico d[eé]bil", re.I)),
+    ("exception-swallow", re.compile(r"Try, Except, (Pass|Continue)|silences|silently returns None", re.I)),
+    ("broad-except", re.compile(r"Use of 'except Exception:'|except Exception\b.*specific", re.I)),
+    ("bare-except", re.compile(r"bare 'except:'", re.I)),
+    ("mutable-default", re.compile(r"mutable\s+default\s+(?:argument|parameter)", re.I)),
+    ("blocking-async", re.compile(r"blocking.*async\s+def|async\s+def.*event\s+loop", re.I)),
+    ("weak-hash", re.compile(r"\b(md5|sha1)\b|weak cryptographic hash", re.I)),
     ("dynamic-exec", re.compile(r"\beval\b|\bexec\b", re.I)),
     ("shell", re.compile(r"shell=True|shell injection|start a process with a shell", re.I)),
     ("pickle", re.compile(r"pickle", re.I)),
@@ -182,16 +182,17 @@ _TOPICS = [
     ("sql", re.compile(r"\bsql\b", re.I)),
 ]
 
-# Severidad por tema cuando la de los motores no refleja el riesgo real.
+# Severity per topic, for topics where the engines' own severity overstates the real risk.
 CALIBRATED_LEVELS = {
-    # Silenciar excepciones es un problema de fiabilidad, no de seguridad.
-    "exception-swallow": "MEDIO",
-    # MD5 y SHA-1 se usan mucho para caché, deduplicar o checksums, que no son usos de seguridad.
-    "weak-hash": "MEDIO",
-    "assert": "BAJO",
+    # Swallowing exceptions is a reliability problem, not a security one.
+    "exception-swallow": "MEDIUM",
+    # MD5 and SHA-1 are widely used for caching, deduplication and checksums, none of which
+    # are security uses.
+    "weak-hash": "MEDIUM",
+    "assert": "LOW",
 }
 _ADVICE = {
-    "weak-hash": " Si no protege nada (caché, deduplicar, checksums), pásale usedforsecurity=False.",
+    "weak-hash": " If it protects nothing (caching, deduplication, checksums), pass usedforsecurity=False.",
 }
 
 
@@ -216,7 +217,7 @@ def _relabel(finding: Finding, level: str) -> Finding:
 
 
 def calibrate(finding: Finding) -> Finding:
-    """Aplica la severidad del tema, si la tiene, y su recomendación."""
+    """Apply the topic's calibrated severity and advice, when the topic has them."""
     name = topic(finding)
     if name not in CALIBRATED_LEVELS:
         return finding
@@ -229,8 +230,8 @@ def calibrate(finding: Finding) -> Finding:
 
 def merge_duplicates(findings: List[Finding]) -> List[Finding]:
     """
-    Funde los hallazgos del mismo archivo, línea y tema en uno. Se conserva el mensaje del
-    motor propio (más explicativo) y se indica qué otros motores lo detectaron.
+    Collapse findings that share file, line and topic into one. The AST engine's message is
+    kept (it is the most explanatory) and the other engines that reported it are listed.
     """
     groups: Dict[tuple, List[Finding]] = {}
     order: List[tuple] = []
@@ -247,17 +248,18 @@ def merge_duplicates(findings: List[Finding]) -> List[Finding]:
         if len(group) == 1:
             merged.append(calibrate(group[0]))
             continue
-        # Mensaje: el del motor AST si lo hay, si no el primero. Severidad: la más grave, luego calibrada.
+        # Message: the AST engine's if present, otherwise the first one. Severity: the worst
+        # in the group, then calibrated for the topic.
         main = next((f for f in group if _engine(f) == "AST"), group[0])
         worst = min(group, key=lambda f: severity_rank(f.level)).level
         others = sorted({_engine(f) for f in group if f is not main} - {_engine(main)})
-        note = f" Detectado también por: {', '.join(others)}." if others else ""
+        note = f" Also detected by: {', '.join(others)}." if others else ""
         merged.append(calibrate(Finding(main.file, main.line, worst, main.message + note, main.rule_id)))
     return merged
 
 
 def drop_covered(items: List[Dict], reference: List[Dict]) -> List[Dict]:
-    """Quita de items los hallazgos cuyo archivo, línea y tema ya están en reference."""
+    """Drop from items the findings whose file, line and topic are already in reference."""
     covered = set()
     for ref in reference:
         f = Finding.from_dict(ref)
@@ -274,7 +276,7 @@ def drop_covered(items: List[Dict], reference: List[Dict]) -> List[Dict]:
 
 
 def sast(files: Iterable[str], *, prefer_bandit: bool = True) -> List[Finding]:
-    """Análisis estático de seguridad sobre archivos Python, sin duplicados entre motores."""
+    """Static security analysis of Python files, with duplicates across engines merged."""
     from ..quality.static_checker import StaticCodeAnalyzer
 
     paths = list(files)
@@ -287,18 +289,18 @@ def sast(files: Iterable[str], *, prefer_bandit: bool = True) -> List[Finding]:
 
 
 def scan_secrets(path: str) -> List[Finding]:
-    """Secretos en un archivo. Un archivo ilegible genera un hallazgo ERROR, no una lista vacía."""
+    """Secrets in one file. An unreadable file yields an ERROR finding, never an empty list."""
     from ..defensive.config_manager import ConfigManager
 
     findings: List[Finding] = []
     try:
         hits = ConfigManager.scan_file_for_secrets(path)
-    except Exception as exc:  # noqa: BLE001 - nunca dar por limpio un archivo que no se pudo leer
-        return [Finding(path, 0, "ERROR", f"No se pudo escanear en busca de secretos: {exc}", "SECRET-SCAN-ERROR")]
+    except Exception as exc:  # noqa: BLE001 - a file we could not read must never be reported as clean
+        return [Finding(path, 0, "ERROR", f"Could not scan for secrets: {exc}", "SECRET-SCAN-ERROR")]
     for line, desc, snippet in hits:
         if line == 0:
-            findings.append(Finding(path, 0, "ERROR", f"No se pudo escanear en busca de secretos: {snippet}",
+            findings.append(Finding(path, 0, "ERROR", f"Could not scan for secrets: {snippet}",
                                     "SECRET-SCAN-ERROR"))
         else:
-            findings.append(Finding(path, line, "ALTO", f"{desc}: {str(snippet).strip()}", "SECRET"))
+            findings.append(Finding(path, line, "HIGH", f"{desc}: {str(snippet).strip()}", "SECRET"))
     return findings

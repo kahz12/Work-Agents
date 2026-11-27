@@ -1,9 +1,9 @@
 """
-Consulta de versiones publicadas en PyPI.
+Lookup of the versions published on PyPI.
 
-Sirve a `fix` para elegir la versión que fija: la más reciente estable, no retirada
-(yanked) e instalable en la versión de Python actual que cumple lo que declara el
-requirements.txt. Nunca inventa una versión.
+`fix` uses it to choose the version to pin: the newest stable, non-yanked release that is
+installable on the running Python version and satisfies what the requirements.txt declares.
+It never invents a version.
 """
 from __future__ import annotations
 
@@ -18,39 +18,40 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from ..common.network import is_offline  # noqa: F401 - reexportado para el resto del agente
+from ..common.network import is_offline  # noqa: F401 - re-exported for the rest of the agent
 
 PYPI_JSON_URL = "https://pypi.org/pypi/{name}/json"
 USER_AGENT = "agentes-devsecops (+https://github.com/kahz12/Work-Agents)"
 
-# Una función que recibe un nombre de paquete y devuelve sus versiones disponibles.
+# A callable that takes a package name and returns its available versions. Tests pass an
+# in-memory index so nothing touches the network.
 VersionIndex = Callable[[str], List[str]]
 
 
 class IndexUnavailable(RuntimeError):
-    """No se pudo consultar el índice (sin red, tiempo agotado, respuesta inválida)."""
+    """The index could not be queried (no network, timeout, invalid response)."""
 
 
 class PackageNotFound(LookupError):
-    """El paquete no existe en el índice."""
+    """The package does not exist in the index."""
 
 
 def http_get_json(url: str, *, timeout: float = 10.0, data: Optional[bytes] = None) -> Dict:
-    """GET (o POST si hay data) que devuelve JSON. Traduce los fallos a IndexUnavailable / PackageNotFound."""
+    """GET (or POST when data is given) returning JSON. Failures become IndexUnavailable / PackageNotFound."""
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data is not None else "GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - URL fija https
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https URL
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise PackageNotFound(url) from exc
-        raise IndexUnavailable(f"HTTP {exc.code} en {urllib.parse.urlsplit(url).netloc}") from exc
+        raise IndexUnavailable(f"HTTP {exc.code} from {urllib.parse.urlsplit(url).netloc}") from exc
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise IndexUnavailable(f"sin conexión con {urllib.parse.urlsplit(url).netloc}: {reason}") from exc
+        raise IndexUnavailable(f"cannot reach {urllib.parse.urlsplit(url).netloc}: {reason}") from exc
 
 
 def _supports_python(requires: Optional[str], python_version: str) -> bool:
@@ -59,13 +60,13 @@ def _supports_python(requires: Optional[str], python_version: str) -> bool:
     try:
         return SpecifierSet(requires).contains(python_version, prereleases=True)
     except InvalidSpecifier:
-        return True  # metadatos mal formados: no se descarta la versión por ello
+        return True  # malformed metadata is not a reason to discard the release
 
 
 def pypi_versions(name: str, *, timeout: float = 10.0, python_version: Optional[str] = None) -> List[str]:
     """
-    Versiones de un paquete en PyPI con al menos un archivo no retirado que se pueda
-    instalar en python_version (por defecto, el intérprete que ejecuta agentes).
+    A package's versions on PyPI that have at least one non-yanked file installable on
+    python_version (by default, the interpreter running agentes).
     """
     python_version = python_version or platform.python_version()
     base = name.split("[", 1)[0].strip()
@@ -80,8 +81,9 @@ def pypi_versions(name: str, *, timeout: float = 10.0, python_version: Optional[
 
 def best_version(versions: Iterable[str], specifier: str = "") -> Optional[str]:
     """
-    La versión más alta que cumple specifier. Excluye prerreleases salvo que el propio
-    especificador las pida o que no haya ninguna versión final que lo cumpla.
+    The highest version that satisfies specifier. Pre-releases are excluded unless the
+    specifier itself asks for one or no final release satisfies it (SpecifierSet.filter
+    implements exactly that rule).
     """
     try:
         spec = SpecifierSet(specifier)
@@ -98,7 +100,7 @@ def best_version(versions: Iterable[str], specifier: str = "") -> Optional[str]:
 
 
 def cached_index(index: VersionIndex) -> VersionIndex:
-    """Envuelve un índice para no consultar dos veces el mismo paquete."""
+    """Wrap an index so each package (by normalised name) is looked up only once."""
     cache: Dict[str, List[str]] = {}
 
     def lookup(name: str) -> List[str]:

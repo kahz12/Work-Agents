@@ -1,10 +1,10 @@
 """
-Tests del agente defensive: tokens firmados, tokens CSRF, RBAC, limitador de frecuencia,
-hashing de contraseñas, esquemas tipados y saneamiento de entrada.
+Tests for the defensive agent: signed tokens, CSRF tokens, RBAC, the rate limiter, password
+hashing, typed schemas and input sanitisation.
 
-Las comprobaciones de seguridad se prueban sobre todo por el lado del rechazo: un token
-manipulado, caducado o de otra sesión tiene que fallar, y un valor fuera de la lista blanca no
-puede pasar por un detalle de la expresión regular.
+Security checks are tested mostly from the rejection side: a tampered, expired or
+other-session token has to fail, and a value outside the allow-list must not slip through
+because of a regular-expression detail.
 """
 import base64
 import hashlib
@@ -25,7 +25,7 @@ from agentes.defensive import auth_manager  # noqa: E402
 from agentes.defensive.auth_manager import AuthManager, RateLimiter  # noqa: E402
 from agentes.defensive.input_sanitizer import InputSanitizer  # noqa: E402
 
-KEY = "clave-de-prueba"
+KEY = "test-key"
 
 
 def _b64(data: bytes) -> str:
@@ -33,279 +33,279 @@ def _b64(data: bytes) -> str:
 
 
 def _signed(header, payload, key=KEY) -> str:
-    """Token con la firma correcta para un header y un payload arbitrarios (para probar el rechazo)."""
+    """A correctly signed token for an arbitrary header and payload (to test rejection paths)."""
     head = _b64(json.dumps(header).encode())
     body = _b64(json.dumps(payload).encode())
     sig = hmac.new(key.encode(), f"{head}.{body}".encode(), hashlib.sha256).digest()
     return f"{head}.{body}.{_b64(sig)}"
 
 
-# --- Tokens firmados (HS256) ---------------------------------------------------------------
+# --- Signed tokens (HS256) -----------------------------------------------------------------
 
-def test_token_firmado_ida_y_vuelta_sin_tocar_el_payload_original():
-    payload = {"sub": "ana", "rol": "admin"}
+def test_signed_token_round_trip_leaves_the_original_payload_untouched():
+    payload = {"sub": "ana", "role": "admin"}
     token = AuthManager.create_secure_token(payload, KEY, expires_in_seconds=60)
     ok, data, msg = AuthManager.verify_secure_token(token, KEY)
-    assert (ok, msg) == (True, "Token válido")
+    assert (ok, msg) == (True, "Valid token")
     assert data["sub"] == "ana" and isinstance(data["exp"], int)
-    assert payload == {"sub": "ana", "rol": "admin"}, "create_secure_token no debe añadir exp al dict del llamador"
+    assert payload == {"sub": "ana", "role": "admin"}, "create_secure_token must not add exp to the caller's dict"
 
 
-def test_token_firmado_con_otra_clave_o_manipulado_se_rechaza():
-    token = AuthManager.create_secure_token({"sub": "ana", "rol": "user"}, KEY)
+def test_signed_token_with_another_key_or_tampered_is_rejected():
+    token = AuthManager.create_secure_token({"sub": "ana", "role": "user"}, KEY)
     head, body, sig = token.split(".")
-    otro_payload = _b64(json.dumps({"sub": "ana", "rol": "admin", "exp": 4102444800}).encode())
-    firma_cambiada = ("A" if sig[0] != "A" else "B") + sig[1:]
-    for candidato, clave in [(token, "otra-clave"), (f"{head}.{otro_payload}.{sig}", KEY),
-                             (f"{head}.{body}.{firma_cambiada}", KEY)]:
-        ok, data, msg = AuthManager.verify_secure_token(candidato, clave)
+    other_payload = _b64(json.dumps({"sub": "ana", "role": "admin", "exp": 4102444800}).encode())
+    changed_signature = ("A" if sig[0] != "A" else "B") + sig[1:]
+    for candidate, key in [(token, "other-key"), (f"{head}.{other_payload}.{sig}", KEY),
+                           (f"{head}.{body}.{changed_signature}", KEY)]:
+        ok, data, msg = AuthManager.verify_secure_token(candidate, key)
         assert (ok, data) == (False, None)
-        assert msg == "Firma del token no válida (posible manipulación)"
+        assert msg == "Invalid token signature (possible tampering)"
 
 
-def test_token_firmado_caducado():
+def test_expired_signed_token():
     token = AuthManager.create_secure_token({"sub": "ana"}, KEY, expires_in_seconds=-1)
-    assert AuthManager.verify_secure_token(token, KEY) == (False, None, "Token expirado")
+    assert AuthManager.verify_secure_token(token, KEY) == (False, None, "Token expired")
 
 
 @pytest.mark.parametrize("token, msg", [
-    ("", "Formato de token inválido"),
-    ("a.b", "Formato de token inválido"),
-    ("a.b.c.d", "Formato de token inválido"),
-    ("%%%.%%%.%%%", "Error en verificación: token malformado"),
-    (_signed({"alg": "HS512"}, {"sub": "x"}), "Algoritmo de token no soportado"),
-    (_signed(["HS256"], {"sub": "x"}), "Algoritmo de token no soportado"),
-    (_signed({"alg": "HS256"}, ["no", "es", "un", "objeto"]), "Error en verificación: token malformado"),
-    (_signed({"alg": "HS256"}, {"exp": "mañana"}), "Error en verificación: token malformado"),
-    (_signed({"alg": "HS256"}, {"exp": True}), "Error en verificación: token malformado"),
+    ("", "Invalid token format"),
+    ("a.b", "Invalid token format"),
+    ("a.b.c.d", "Invalid token format"),
+    ("%%%.%%%.%%%", "Verification error: malformed token"),
+    (_signed({"alg": "HS512"}, {"sub": "x"}), "Unsupported token algorithm"),
+    (_signed(["HS256"], {"sub": "x"}), "Unsupported token algorithm"),
+    (_signed({"alg": "HS256"}, ["not", "an", "object"]), "Verification error: malformed token"),
+    (_signed({"alg": "HS256"}, {"exp": "tomorrow"}), "Verification error: malformed token"),
+    (_signed({"alg": "HS256"}, {"exp": True}), "Verification error: malformed token"),
 ])
-def test_token_firmado_malformado_se_rechaza_sin_excepciones(token, msg):
+def test_malformed_signed_token_is_rejected_without_raising(token, msg):
     assert AuthManager.verify_secure_token(token, KEY) == (False, None, msg)
 
 
-def test_token_firmado_sin_exp_es_valido_si_la_firma_cuadra():
-    """create_secure_token siempre añade exp; sin él, solo la firma decide."""
+def test_signed_token_without_exp_is_valid_when_the_signature_matches():
+    """create_secure_token always adds exp; without it, only the signature decides."""
     ok, data, _ = AuthManager.verify_secure_token(_signed({"alg": "HS256"}, {"sub": "x"}), KEY)
     assert ok and data == {"sub": "x"}
 
 
-# --- Tokens CSRF ----------------------------------------------------------------------------
+# --- CSRF tokens ----------------------------------------------------------------------------
 
-def test_csrf_valido_solo_para_su_sesion_y_su_clave():
-    token = AuthManager.create_csrf_token(KEY, "sesion:con:dos:puntos")
-    assert AuthManager.verify_csrf_token(token, KEY, "sesion:con:dos:puntos")
-    assert not AuthManager.verify_csrf_token(token, KEY, "otra-sesion")
-    assert not AuthManager.verify_csrf_token(token, "otra-clave", "sesion:con:dos:puntos")
+def test_csrf_token_is_valid_only_for_its_session_and_key():
+    token = AuthManager.create_csrf_token(KEY, "session:with:colons")
+    assert AuthManager.verify_csrf_token(token, KEY, "session:with:colons")
+    assert not AuthManager.verify_csrf_token(token, KEY, "other-session")
+    assert not AuthManager.verify_csrf_token(token, "other-key", "session:with:colons")
 
 
-def test_csrf_caducado_o_con_la_firma_cambiada_se_rechaza():
-    caducado = AuthManager.create_csrf_token(KEY, "s1", expires_in_seconds=-1)
-    assert not AuthManager.verify_csrf_token(caducado, KEY, "s1")
+def test_expired_or_altered_csrf_token_is_rejected():
+    expired = AuthManager.create_csrf_token(KEY, "s1", expires_in_seconds=-1)
+    assert not AuthManager.verify_csrf_token(expired, KEY, "s1")
     token = AuthManager.create_csrf_token(KEY, "s1")
-    alterado = token[:-1] + ("0" if token[-1] != "0" else "1")
-    assert not AuthManager.verify_csrf_token(alterado, KEY, "s1")
+    altered = token[:-1] + ("0" if token[-1] != "0" else "1")
+    assert not AuthManager.verify_csrf_token(altered, KEY, "s1")
 
 
 @pytest.mark.parametrize("token", [
-    "", "s1", "s1:123", "s1:no-es-numero:" + "a" * 64, "s1:4102444800:corta", None, 12345,
+    "", "s1", "s1:123", "s1:not-a-number:" + "a" * 64, "s1:4102444800:short", None, 12345,
 ])
-def test_csrf_malformado_se_rechaza(token):
+def test_malformed_csrf_token_is_rejected(token):
     assert AuthManager.verify_csrf_token(token, KEY, "s1") is False
 
 
 # --- RBAC -----------------------------------------------------------------------------------
 
-ROLES = {"admin": ["*"], "editor": ["leer", "escribir"], "lector": ["leer"]}
+ROLES = {"admin": ["*"], "editor": ["read", "write"], "reader": ["read"]}
 
 
-@pytest.mark.parametrize("roles, permiso, esperado", [
-    (["lector"], "leer", True),
-    (["lector"], "escribir", False),
-    (["lector", "editor"], "escribir", True),
-    (["admin"], "borrar", True),
-    (["desconocido"], "leer", False),
-    ([], "leer", False),
+@pytest.mark.parametrize("roles, permission, expected", [
+    (["reader"], "read", True),
+    (["reader"], "write", False),
+    (["reader", "editor"], "write", True),
+    (["admin"], "delete", True),
+    (["unknown"], "read", False),
+    ([], "read", False),
 ])
-def test_rbac(roles, permiso, esperado):
-    assert AuthManager.check_permission(roles, permiso, ROLES) is esperado
+def test_rbac(roles, permission, expected):
+    assert AuthManager.check_permission(roles, permission, ROLES) is expected
 
 
-# --- Limitador de frecuencia ----------------------------------------------------------------
+# --- Rate limiter --------------------------------------------------------------------------
 
 @pytest.fixture
-def reloj(monkeypatch):
-    """Reloj controlado para auth_manager: el test avanza el tiempo sin esperar."""
-    ahora = [1000.0]
-    monkeypatch.setattr(auth_manager, "time", types.SimpleNamespace(time=lambda: ahora[0]))
-    return ahora
+def clock(monkeypatch):
+    """Controlled clock for auth_manager: the test moves time forward without waiting."""
+    now = [1000.0]
+    monkeypatch.setattr(auth_manager, "time", types.SimpleNamespace(time=lambda: now[0]))
+    return now
 
 
-def test_rate_limiter_bloquea_al_superar_el_maximo_y_libera_al_pasar_la_ventana(reloj):
+def test_rate_limiter_blocks_above_the_limit_and_releases_after_the_window(clock):
     rl = RateLimiter(max_requests=3, window_seconds=60)
     assert [rl.is_allowed("ip") for _ in range(4)] == [True, True, True, False]
-    assert rl.is_allowed("otra-ip"), "cada identificador tiene su propio cupo"
-    reloj[0] += 59
+    assert rl.is_allowed("other-ip"), "each identifier has its own quota"
+    clock[0] += 59
     assert not rl.is_allowed("ip")
-    reloj[0] += 1
-    assert rl.is_allowed("ip"), "las peticiones de hace 60 segundos ya no cuentan"
+    clock[0] += 1
+    assert rl.is_allowed("ip"), "requests from 60 seconds ago no longer count"
 
 
-def test_rate_limiter_acotado_descarta_antes_lo_caducado_que_lo_reciente(reloj):
+def test_bounded_rate_limiter_evicts_stale_entries_before_recent_ones(clock):
     rl = RateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=2)
-    rl.is_allowed("viejo")
-    reloj[0] += 20
-    rl.is_allowed("reciente")
-    rl.is_allowed("nuevo")
-    assert set(rl.requests) == {"reciente", "nuevo"}
-    assert not rl.is_allowed("reciente"), "el reciente conserva su historial"
+    rl.is_allowed("old")
+    clock[0] += 20
+    rl.is_allowed("recent")
+    rl.is_allowed("new")
+    assert set(rl.requests) == {"recent", "new"}
+    assert not rl.is_allowed("recent"), "the recent identifier keeps its history"
 
 
-def test_rate_limiter_sin_cupo_no_guarda_nada(reloj):
+def test_rate_limiter_with_no_quota_stores_nothing(clock):
     rl = RateLimiter(max_requests=0)
     assert not rl.is_allowed("ip")
     assert rl.requests == {}
 
 
-# --- Hashing de contraseñas -----------------------------------------------------------------
+# --- Password hashing ---------------------------------------------------------------------
 
 @pytest.fixture
-def sin_backends(monkeypatch):
+def no_backends(monkeypatch):
     monkeypatch.setattr(auth_manager, "HAS_ARGON2", False)
     monkeypatch.setattr(auth_manager, "HAS_BCRYPT", False)
 
 
-def test_pbkdf2_cuando_no_hay_argon2_ni_bcrypt(sin_backends):
+def test_pbkdf2_when_neither_argon2_nor_bcrypt_is_available(no_backends):
     assert AuthManager.get_available_crypto_backend() == "pbkdf2:sha256"
-    stored = AuthManager.hash_password("Correcta-123", iterations=1000)
+    stored = AuthManager.hash_password("Correct-123", iterations=1000)
     assert stored.startswith("pbkdf2:sha256:1000:")
-    assert AuthManager.verify_password("Correcta-123", stored)
-    assert not AuthManager.verify_password("Incorrecta-123", stored)
+    assert AuthManager.verify_password("Correct-123", stored)
+    assert not AuthManager.verify_password("Wrong-123", stored)
 
 
-@pytest.mark.parametrize("stored, esperado", [
+@pytest.mark.parametrize("stored, expected", [
     ("pbkdf2:sha256:600000:c2Fs:aGFzaA==", False),
     ("pbkdf2:sha256:1000:c2Fs:aGFzaA==", True),
     ("pbkdf2:sha256", True),
-    ("pbkdf2:sha256:muchas:c2Fs:aGFzaA==", True),
+    ("pbkdf2:sha256:many:c2Fs:aGFzaA==", True),
     ("argon2:$argon2id$...", False),
 ])
-def test_needs_rehash_sin_un_algoritmo_mejor(sin_backends, stored, esperado):
-    assert AuthManager.needs_rehash(stored) is esperado
+def test_needs_rehash_without_a_stronger_algorithm(no_backends, stored, expected):
+    assert AuthManager.needs_rehash(stored) is expected
 
 
-def test_needs_rehash_pide_cambiar_pbkdf2_si_hay_un_algoritmo_mejor(monkeypatch):
+def test_needs_rehash_asks_to_replace_pbkdf2_when_a_stronger_algorithm_exists(monkeypatch):
     monkeypatch.setattr(auth_manager, "HAS_ARGON2", True)
     assert AuthManager.needs_rehash("pbkdf2:sha256:600000:c2Fs:aGFzaA==")
 
 
-def test_bcrypt_cuando_no_hay_argon2(monkeypatch):
+def test_bcrypt_when_argon2_is_not_available(monkeypatch):
     pytest.importorskip("bcrypt")
     monkeypatch.setattr(auth_manager, "HAS_ARGON2", False)
     monkeypatch.setattr(auth_manager, "HAS_BCRYPT", True)
     assert AuthManager.get_available_crypto_backend() == "bcrypt"
-    stored = AuthManager.hash_password("Correcta-123")
+    stored = AuthManager.hash_password("Correct-123")
     assert stored.startswith("bcrypt:$2")
-    assert AuthManager.verify_password("Correcta-123", stored)
-    assert not AuthManager.verify_password("Incorrecta-123", stored)
+    assert AuthManager.verify_password("Correct-123", stored)
+    assert not AuthManager.verify_password("Wrong-123", stored)
 
 
 @pytest.mark.parametrize("stored", [
-    "", "nada", "argon2:no-es-un-hash", "bcrypt:no-es-un-hash", "pbkdf2:sha256:1000:%%%:%%%",
+    "", "nothing", "argon2:not-a-hash", "bcrypt:not-a-hash", "pbkdf2:sha256:1000:%%%:%%%",
     "pbkdf2:md99:1000:c2Fs:aGFzaA==", "a:b:c",
 ])
-def test_verify_password_con_un_hash_ilegible_devuelve_false(stored):
+def test_verify_password_with_an_unreadable_hash_returns_false(stored):
     assert AuthManager.verify_password("x", stored) is False
 
 
-def test_contrasena_sin_minusculas_lo_dice():
-    _, feedback = AuthManager.evaluate_password_strength("SOLOMAYUS-9")
-    assert "Incluye al menos una letra minúscula." in feedback
+def test_password_without_lowercase_says_so():
+    _, feedback = AuthManager.evaluate_password_strength("UPPERCASE-9")
+    assert "Include at least one lowercase letter." in feedback
 
 
-# --- Esquemas tipados ------------------------------------------------------------------------
+# --- Typed schemas ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("valor, tipo, esperado", [
+@pytest.mark.parametrize("value, type_, expected", [
     (1.5, float, True), (1, float, False), (True, float, False),
     (1, int, True), (True, int, False), (False, bool, True), ("x", str, True), ([], list, True),
 ])
-def test_tipos_estrictos(valor, tipo, esperado):
-    assert matches_schema_type(valor, tipo) is esperado
+def test_strict_types(value, type_, expected):
+    assert matches_schema_type(value, type_) is expected
 
 
-@pytest.mark.parametrize("payload, schema, mensaje", [
-    ([], {"id": int}, "El payload recibido no es un objeto JSON (diccionario)."),
-    ({}, {"id": int}, "Falta el campo requerido: 'id'"),
-    ({"user": "ana"}, {"user": {"name": str}}, "'user' debe ser un objeto, se recibió str"),
-    ({"tags": "a,b"}, {"tags": [str]}, "'tags' debe ser una lista, se recibió str"),
+@pytest.mark.parametrize("payload, schema, message", [
+    ([], {"id": int}, "The payload is not a JSON object (dict)."),
+    ({}, {"id": int}, "Missing required field: 'id'"),
+    ({"user": "ana"}, {"user": {"name": str}}, "'user' must be an object, got str"),
+    ({"tags": "a,b"}, {"tags": [str]}, "'tags' must be a list, got str"),
     ({"tags": ["a", 2]}, {"tags": [str]}, "tags[1]"),
-    ({"x": 1}, {"x": "int"}, "Esquema no soportado en 'x'"),
+    ({"x": 1}, {"x": "int"}, "Unsupported schema at 'x'"),
 ])
-def test_esquema_explica_cada_error(payload, schema, mensaje):
+def test_schema_explains_every_error(payload, schema, message):
     ok, errors = validate_typed_schema(payload, schema)
     assert not ok
-    assert any(mensaje in e for e in errors), errors
+    assert any(message in e for e in errors), errors
 
 
-def test_esquema_valido_con_listas_y_anidados():
+def test_valid_schema_with_lists_and_nested_objects():
     schema = {"id": int, "tags": [str], "owner": {"name": str, "score": float}}
     assert validate_typed_schema({"id": 1, "tags": [], "owner": {"name": "a", "score": 1.0}}, schema) == (True, [])
 
 
-# --- Saneamiento de entrada ------------------------------------------------------------------
+# --- Input sanitisation ---------------------------------------------------------------------
 
-def test_sanitize_html_escapa_y_no_acepta_otros_tipos():
+def test_sanitize_html_escapes_and_rejects_other_types():
     assert InputSanitizer.sanitize_html('  <img src=x onerror="alert(1)">  ') == \
         "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"
     assert InputSanitizer.sanitize_html(None) == ""
 
 
-@pytest.mark.parametrize("email, esperado", [
+@pytest.mark.parametrize("email, expected", [
     ("ana@example.com", True), ("  ana.b+tag@sub.example.org ", True), ("ana@", False),
     ("@example.com", False), ("ana example@x.com", False), ("", False), (None, False),
 ])
-def test_validate_email(email, esperado):
-    assert InputSanitizer.validate_email(email) is esperado
+def test_validate_email(email, expected):
+    assert InputSanitizer.validate_email(email) is expected
 
 
-@pytest.mark.parametrize("nombre, esperado", [
-    ("informe.pdf", "informe.pdf"), ("../../etc/passwd", "passwd"), ("", "file_default"),
+@pytest.mark.parametrize("name, expected", [
+    ("report.pdf", "report.pdf"), ("../../etc/passwd", "passwd"), ("", "file_default"),
     (None, "file_default"),
 ])
-def test_sanitize_filename(nombre, esperado):
-    assert InputSanitizer.sanitize_filename(nombre) == esperado
+def test_sanitize_filename(name, expected):
+    assert InputSanitizer.sanitize_filename(name) == expected
 
 
-def test_ruta_segura_rechaza_lo_que_sale_de_la_base(tmp_path):
+def test_safe_path_rejects_anything_outside_the_base(tmp_path):
     base = str(tmp_path)
     assert InputSanitizer.validate_safe_path(base, "sub/a.txt") == str(tmp_path / "sub" / "a.txt")
-    assert InputSanitizer.validate_safe_path(base, "../fuera.txt") is None
+    assert InputSanitizer.validate_safe_path(base, "../outside.txt") is None
     assert InputSanitizer.validate_safe_path(base, "/etc/passwd") is None
     assert InputSanitizer.validate_safe_path(base, None) is None
     assert InputSanitizer.validate_safe_path(base, "a\x00b") is None
 
 
-@pytest.mark.parametrize("texto, permitidos, esperado", [
-    ("usuario_1", r"a-zA-Z0-9_", True),
-    ("usuario 1", r"a-zA-Z0-9_", False),
+@pytest.mark.parametrize("text, allowed, expected", [
+    ("user_1", r"a-zA-Z0-9_", True),
+    ("user 1", r"a-zA-Z0-9_", False),
     ("", r"a-z", True),
     (None, r"a-z", False),
-    # `$` en Python también acepta un salto de línea final: "admin\n" no debe pasar una lista de solo letras.
+    # In Python `$` also matches before a trailing newline: "admin\n" must not pass a letters-only allow-list.
     ("admin\n", r"a-z", False),
-    ("con espacio\n", r"a-z\s", True),
+    ("with space\n", r"a-z\s", True),
 ])
-def test_lista_blanca(texto, permitidos, esperado):
-    assert InputSanitizer.validate_string_whitelist(texto, permitidos) is esperado
+def test_allow_list(text, allowed, expected):
+    assert InputSanitizer.validate_string_whitelist(text, allowed) is expected
 
 
-@pytest.mark.parametrize("valor, minimo, maximo, esperado", [
+@pytest.mark.parametrize("value, minimum, maximum, expected", [
     ("42", None, None, 42), (42, 0, 100, 42), (-1, 0, 100, None), (101, 0, 100, None),
     ("x", None, None, None), (None, None, None, None), (True, None, None, None), (3.9, None, None, 3),
 ])
-def test_sanitize_integer(valor, minimo, maximo, esperado):
-    assert InputSanitizer.sanitize_integer(valor, minimo, maximo) == esperado
+def test_sanitize_integer(value, minimum, maximum, expected):
+    assert InputSanitizer.sanitize_integer(value, minimum, maximum) == expected
 
 
-def test_validate_json_schema_delega_en_el_esquema():
+def test_validate_json_schema_delegates_to_the_schema_module():
     assert InputSanitizer.validate_json_schema({"id": 1}, {"id": int}) == (True, [])
     ok, _ = InputSanitizer.validate_json_schema({"id": 1, "extra": 2}, {"id": int}, reject_extra_keys=True)
     assert not ok

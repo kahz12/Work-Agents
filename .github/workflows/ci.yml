@@ -15,25 +15,25 @@ concurrency:
 
 jobs:
   lint:
-    name: Ruff y mypy
+    name: Ruff and mypy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Versión fija: con el estilo bloqueante, una versión nueva que estabilice reglas
-      # podría romper el CI sin que cambie el código. Se actualiza a mano.
+      # Pinned on purpose: lint failures block the build, so a new release that stabilises
+      # rules could break CI without any code change. Bump it by hand.
       - run: pip install ruff==0.17.5
-      # Este job corre sobre un checkout limpio, antes de que ninguna demo
-      # genere artefactos, así que ruff solo ve fuente versionada.
-      # El formato (`ruff format`) no se comprueba: el código no sigue ese estilo.
-      - name: Errores, estilo y orden de imports (E, F, W, I)
+      # This job runs on a clean checkout, before any demo writes artefacts, so ruff only
+      # sees committed source. Formatting (`ruff format`) is not checked: the code base does
+      # not follow that style.
+      - name: Errors, style and import order (E, F, W, I)
         run: ruff check .
-      # También con versión fija: una versión nueva de mypy puede añadir errores sin que cambie el
-      # código. Con el extra crypto, para que argon2 y bcrypt tengan sus tipos reales.
+      # Pinned for the same reason: a new mypy release can report new errors without any code
+      # change. The crypto extra is installed so argon2 and bcrypt are checked with their real types.
       - run: pip install -e ".[crypto]" mypy==2.4.1 types-PyYAML==6.0.12.20261113
-      - name: Tipos (mypy, configuración en pyproject.toml)
+      - name: Types (mypy, configured in pyproject.toml)
         run: mypy
 
   test:
@@ -49,16 +49,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[all]"
-      - name: Suite pytest
+      - name: pytest suite
         run: coverage run -m pytest -q
-      - name: Verificación exhaustiva de los 8 agentes
+      - name: End-to-end check of the 8 agents
         run: coverage run --append test_all_agents.py
-      # Suma de las dos ejecuciones; el mínimo está en [tool.coverage.report] de pyproject.toml.
-      - name: Cobertura
+      # Combined coverage of both runs; the minimum lives in [tool.coverage.report] in pyproject.toml.
+      - name: Coverage
         run: coverage report
 
   self-audit:
-    name: Auditoría del propio repo
+    name: Self-audit of the repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,11 +66,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      # La herramienta se aplica a su propio código. Los hallazgos intencionados (el corpus
-      # de secretos falsos de los tests, las demos vulnerables a propósito) están revisados en
-      # .agentes-baseline.json: el trabajo falla solo con hallazgos nuevos. Se usa el motor
-      # AST porque es con el que se generó la línea base.
-      - name: agentes pipeline sobre el repo
+      # The tool audits its own code. Deliberate findings (the tests' corpus of fake secrets,
+      # the intentionally vulnerable demos) are reviewed and recorded in .agentes-baseline.json,
+      # so the job only fails on new findings. The AST engine is used because the baseline was
+      # generated with it.
+      - name: agentes pipeline on the repository
         run: agentes pipeline . -o reports --no-bandit --baseline .agentes-baseline.json
       - uses: actions/upload-artifact@v4
         if: always()
@@ -79,7 +79,7 @@ jobs:
           path: reports/
 
   wheel:
-    name: Wheel instalable
+    name: Installable wheel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,12 +88,12 @@ jobs:
           python-version: "3.12"
       - run: pip install build
       - run: python -m build --wheel
-      # Instala fuera del checkout: si al wheel le faltan paquetes, esto lo caza.
-      - name: Instalar el wheel en un venv limpio
+      # Install outside the checkout: if the wheel is missing a package, this catches it.
+      - name: Install the wheel into a clean venv
         run: |
           python -m venv /tmp/venv
           /tmp/venv/bin/pip install dist/*.whl
-      - name: El CLI instalado debe funcionar sin el checkout
+      - name: The installed CLI must work without the checkout
         run: |
           mkdir -p /tmp/probe && cd /tmp/probe
           printf 'def ok():\n    return 1\n' > s.py
@@ -113,7 +113,7 @@ jobs:
           for a in defensive quality hardening refactor qa sre devops docs; do
             /tmp/venv/bin/agentes demo "$a" > /dev/null
           done
-      - name: El demo no debe escribir dentro de la instalación
+      - name: The demos must not write inside the installation
         run: |
           test -z "$(find /tmp/venv/lib -name 'qa_report.html' -o -name 'openapi.json' -o -name 'results.sarif')"
       - uses: actions/upload-artifact@v4

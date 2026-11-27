@@ -1,6 +1,6 @@
 """
-Auditorías de audits.py: qué auditor le toca a cada archivo, la fusión de hallazgos entre
-motores y qué pasa cuando un archivo no se puede leer.
+Tests for audits.py: which auditor handles each file, how findings from several engines are
+merged, and what happens when a file cannot be read.
 """
 import os
 import sys
@@ -15,60 +15,60 @@ from agentes.common import audits  # noqa: E402
 from agentes.common.findings import Finding  # noqa: E402
 
 
-@pytest.mark.parametrize("nombre, tipo", [
+@pytest.mark.parametrize("name, kind", [
     ("Dockerfile", "docker"), ("Dockerfile.prod", "docker"), ("app.dockerfile", "docker"),
     ("api.service", "systemd"), ("requirements-dev.txt", "deps"), ("package.json", "deps"),
     ("ci.yml", "yaml"), ("values.yaml", "yaml"), (".env", "env"), (".env.local", "env"), ("prod.env", "env"),
     ("app.log", "logs"), ("test_api.py", "tests"), ("api_test.py", "tests"), ("api.py", None), ("README.md", None),
 ])
-def test_tipo_de_auditoria_por_el_nombre(nombre, tipo):
-    assert audits.detect_kind(os.path.join("sub", nombre)) == tipo
+def test_audit_kind_from_file_name(name, kind):
+    assert audits.detect_kind(os.path.join("sub", name)) == kind
 
 
-def test_auditar_un_tipo_que_no_existe(tmp_path):
-    with pytest.raises(ValueError, match="no reconocido"):
+def test_auditing_an_unknown_kind(tmp_path):
+    with pytest.raises(ValueError, match="Unrecognised audit kind"):
         audits.audit_file(str(tmp_path / "README.md"))
 
 
-def test_auditar_systemd_package_json_y_suites(tmp_path):
+def test_auditing_systemd_package_json_and_test_suites(tmp_path):
     service = tmp_path / "api.service"
     service.write_text("[Service]\nExecStart=/usr/bin/api\n", encoding="utf-8")
     assert {f.rule_id for f in audits.audit_file(str(service))} == {"SYSTEMD"}
     pkg = tmp_path / "package.json"
     pkg.write_text('{"dependencies": {"left-pad": "^1.3.0"}}', encoding="utf-8")
     [npm] = audits.audit_file(str(pkg))
-    assert (npm.rule_id, npm.level) == ("DEPS-NPM", "MEDIO") and "left-pad" in npm.message
+    assert (npm.rule_id, npm.level) == ("DEPS-NPM", "MEDIUM") and "left-pad" in npm.message
     suite = tmp_path / "test_x.py"
     suite.write_text("def test_a():\n    assert True\n", encoding="utf-8")
     assert any("WEAK-ASSERT" in f.message for f in audits.audit_file(str(suite)))
-    broken = tmp_path / "test_roto.py"
+    broken = tmp_path / "test_broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
     [error] = audits.audit_file(str(broken))
     assert (error.level, error.rule_id) == ("ERROR", "TEST-QUALITY")
 
 
-def test_secretos_de_un_archivo_que_no_se_pudo_escanear(tmp_path, monkeypatch):
+def test_secret_scan_of_a_file_that_could_not_be_scanned(tmp_path, monkeypatch):
     from agentes.defensive.config_manager import ConfigManager
 
     path = str(tmp_path / "x.py")
 
-    def explota(p):
-        raise RuntimeError("disco roto")
+    def explode(p):
+        raise RuntimeError("disk failure")
 
-    monkeypatch.setattr(ConfigManager, "scan_file_for_secrets", staticmethod(explota))
+    monkeypatch.setattr(ConfigManager, "scan_file_for_secrets", staticmethod(explode))
     [finding] = audits.scan_secrets(path)
-    assert (finding.level, finding.rule_id) == ("ERROR", "SECRET-SCAN-ERROR") and "disco roto" in finding.message
-    monkeypatch.setattr(ConfigManager, "scan_file_for_secrets", staticmethod(lambda p: [(0, "", "sin permiso")]))
+    assert (finding.level, finding.rule_id) == ("ERROR", "SECRET-SCAN-ERROR") and "disk failure" in finding.message
+    monkeypatch.setattr(ConfigManager, "scan_file_for_secrets", staticmethod(lambda p: [(0, "", "permission denied")]))
     [finding] = audits.scan_secrets(path)
-    assert finding.rule_id == "SECRET-SCAN-ERROR" and "sin permiso" in finding.message
+    assert finding.rule_id == "SECRET-SCAN-ERROR" and "permission denied" in finding.message
 
 
-def test_fusion_indica_los_otros_motores_que_lo_detectaron():
-    ast_finding = Finding("a.py", 4, "ALTO", "Uso de 'except Exception: pass' que silencia errores.", "SAST-ALTO")
-    solid = Finding("a.py", 4, "ALTO", "[EXCEPTION-HYGIENE] Bloque 'except' silencia la excepción con 'pass'.",
+def test_merge_lists_the_other_engines_that_reported_it():
+    ast_finding = Finding("a.py", 4, "HIGH", "Use of 'except Exception: pass', which silences errors.", "SAST-HIGH")
+    solid = Finding("a.py", 4, "HIGH", "[EXCEPTION-HYGIENE] The 'except' block silences the exception with 'pass'.",
                     "SOLID-EXCEPTION-HYGIENE")
-    bandit = Finding("a.py", 4, "BAJO", "[bandit] Try, Except, Pass detected.", "SAST-BAJO")
+    bandit = Finding("a.py", 4, "LOW", "[bandit] Try, Except, Pass detected.", "SAST-LOW")
     [merged] = audits.merge_duplicates([ast_finding, solid, bandit])
-    assert merged.message.startswith("Uso de 'except Exception: pass'")
-    assert merged.message.endswith("Detectado también por: SOLID, bandit.")
-    assert merged.level == "MEDIO", "silenciar excepciones se calibra como fiabilidad, no seguridad"
+    assert merged.message.startswith("Use of 'except Exception: pass'")
+    assert merged.message.endswith("Also detected by: SOLID, bandit.")
+    assert merged.level == "MEDIUM", "swallowing exceptions is calibrated as reliability, not security"

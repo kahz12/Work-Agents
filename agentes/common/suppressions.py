@@ -1,27 +1,29 @@
 """
-Hallazgos silenciados en su propia línea.
+Findings suppressed on their own line.
 
-    resultado = eval(expr)  # agentes: ignore[dynamic-exec] - la expresión se valida antes
-    token = "valor-de-prueba"  # agentes: ignore
+    result = eval(expr)  # agentes: ignore[dynamic-exec] - expr is validated above
+    token = "test-value"  # agentes: ignore
 
-`# agentes: ignore` silencia todo lo que se señale en esa línea. Con corchetes silencia solo
-las reglas indicadas, separadas por comas. Cada una puede ser:
+`# agentes: ignore` suppresses everything reported on that line. With brackets it only
+suppresses the listed rules, separated by commas. Each one can be:
 
-- el `rule_id` de los informes JSON (SECRET, SOLID-GUARD, DEPS-PIP...) o su prefijo (SAST,
-  SOLID, K8S);
-- el `ruleId` del informe SARIF, el que muestra GitHub Code Scanning (SAST-SHELL, SAST-TOCTOU);
-- el nombre de la regla, de `rules.RULE_NAMES` (broad-except, shell, weak-hash, docstring...).
+- the `rule_id` from the JSON reports (SECRET, SOLID-GUARD, DEPS-PIP...) or a prefix of it
+  (SAST, SOLID, K8S);
+- the `ruleId` from the SARIF report, the one GitHub Code Scanning shows (SAST-SHELL,
+  SAST-TOCTOU);
+- the rule name from `rules.RULE_NAMES` (broad-except, shell, weak-hash, docstring...).
 
-También se respetan los códigos de ruff/flake8 (`# noqa: BLE001`) y de Bandit (`# nosec B602`)
-que equivalen a una regla propia, para no repetir la misma justificación con dos sintaxis:
+Ruff/flake8 codes (`# noqa: BLE001`) and Bandit codes (`# nosec B602`) that map onto one of
+our rules are honoured too, so the same justification does not have to be written twice in
+two syntaxes:
 
-- `# noqa` sin códigos no silencia nada: suele estar ahí por otra herramienta (una línea larga,
-  un import) y ocultaría hallazgos de seguridad sin que nadie lo decidiera.
-- `# nosec` sin códigos silencia el análisis estático de la línea (SAST), como hace Bandit,
-  pero no los secretos: para eso hay que escribir `# agentes: ignore[SECRET]`.
+- `# noqa` without codes suppresses nothing: it is usually there for another tool (a long
+  line, an import), and honouring it would hide security findings nobody chose to accept.
+- `# nosec` without codes suppresses static analysis (SAST) on that line, as Bandit does, but
+  not secrets: those need an explicit `# agentes: ignore[SECRET]`.
 
-El marcador tiene que estar en la línea que indica el hallazgo. Los hallazgos sin línea (un
-archivo entero, una cabecera HTTP) solo se pueden aceptar con la línea base.
+The marker has to be on the line the finding points at. Findings without a line (a whole
+file, an HTTP header) can only be accepted through the baseline.
 """
 from __future__ import annotations
 
@@ -35,8 +37,8 @@ _AGENTES_RE = re.compile(r"#\s*agentes\s*:\s*ignore\b(?:\[([^\]]*)\])?", re.IGNO
 _NOQA_RE = re.compile(r"#\s*noqa\b(?:\s*:\s*([A-Z]+[0-9]+(?:\s*,\s*[A-Z]+[0-9]+)*))?", re.IGNORECASE)
 _NOSEC_RE = re.compile(r"#\s*nosec\b(?:\s*:?\s*(B[0-9]{3}(?:\s*,?\s*B[0-9]{3})*))?", re.IGNORECASE)
 
-# Códigos de Bandit y la regla propia equivalente. Las reglas S de ruff son las de Bandit con
-# otra letra (B602 -> S602), así que se derivan de esta tabla.
+# Bandit codes and the equivalent rule names of our own. Ruff's S rules are Bandit's rules
+# under a different letter (B602 -> S602), so they are derived from this table.
 _BANDIT_EQUIVALENTS: Dict[str, Set[str]] = {
     "B101": {"assert"},
     "B102": {"dynamic-exec"},
@@ -73,7 +75,7 @@ _LINT_EQUIVALENTS: Dict[str, Set[str]] = {
     "D103": {"docstring"},
 }
 
-# Lo que silencia cada marcador sin códigos.
+# What a marker without codes suppresses.
 _ALL = "*"
 _ALL_SAST = "sast:*"
 
@@ -84,8 +86,8 @@ def _split_codes(text: Optional[str]) -> List[str]:
 
 def markers(line: str) -> Set[str]:
     """
-    Qué silencia una línea: nombres de regla, rule_id o prefijos en mayúsculas, "*" (todo) o
-    "sast:*" (todo el análisis estático). Vacío si la línea no tiene ningún marcador.
+    What a source line suppresses: rule names, rule_ids or prefixes (lowercased), "*" (all) or
+    "sast:*" (all static analysis). Empty when the line carries no marker.
     """
     if "#" not in line:
         return set()
@@ -123,8 +125,8 @@ T = TypeVar("T", bound=FindingLike)
 
 class InlineSuppressions:
     """
-    Filtra los hallazgos silenciados en su línea y cuenta cuántos. Lee cada archivo una sola
-    vez; un archivo que no se puede leer no silencia nada.
+    Drops findings suppressed on their own line and counts how many were dropped. Each file is
+    read once; a file that cannot be read suppresses nothing.
     """
 
     def __init__(self) -> None:
@@ -142,7 +144,7 @@ class InlineSuppressions:
         return lines[line - 1] if 0 < line <= len(lines) else ""
 
     def silences(self, item: FindingLike) -> bool:
-        """True si el hallazgo está silenciado en su línea. Cada True cuenta en suppressed."""
+        """True when the finding is suppressed on its line. Every True is counted in `suppressed`."""
         finding = as_finding(item)
         if not finding.line or not finding.file or "://" in finding.file:
             return False
@@ -152,5 +154,5 @@ class InlineSuppressions:
         return False
 
     def filter(self, findings: Iterable[T]) -> List[T]:
-        """Devuelve los hallazgos que no están silenciados, en el mismo orden y con su tipo."""
+        """Return the findings that are not suppressed, in the same order and with the same type."""
         return [item for item in findings if not self.silences(item)]

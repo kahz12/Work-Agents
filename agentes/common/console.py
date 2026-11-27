@@ -1,7 +1,7 @@
 """
-Salida de terminal del CLI: color opcional, etiquetas de severidad, tablas y hallazgos.
+Terminal output for the CLI: optional colour, severity tags, tables and finding lists.
 
-El color se activa solo si la salida es un terminal. Respeta NO_COLOR y FORCE_COLOR.
+Colour is only enabled when the output is a terminal. NO_COLOR and FORCE_COLOR are honoured.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 import textwrap
 from typing import Any, Dict, Optional, Sequence
 
-from .findings import (  # noqa: F401 - reexportados para quien importe desde la consola
+from .findings import (  # noqa: F401 - re-exported for callers that import them from here
     BLOCKING_LEVELS,
     SEVERITY_ORDER,
     SILENT_LEVELS,
@@ -28,21 +28,21 @@ _CODES = {
 }
 
 _LEVEL_STYLES = {
-    "CRITICO": ("red", "bold"), "ERROR": ("red", "bold"), "ALTO": ("red",),
-    "MEDIO": ("yellow",), "BAJO": ("cyan",), "INFORMACION": ("dim",), "OK": ("green",),
+    "CRITICAL": ("red", "bold"), "ERROR": ("red", "bold"), "HIGH": ("red",),
+    "MEDIUM": ("yellow",), "LOW": ("cyan",), "INFO": ("dim",), "OK": ("green",),
 }
-_LEVEL_PLURALS = {
-    "CRITICO": ("crítico", "críticos"), "ERROR": ("error", "errores"), "ALTO": ("alto", "altos"),
-    "MEDIO": ("medio", "medios"), "BAJO": ("bajo", "bajos"),
-    "INFORMACION": ("informativo", "informativos"), "OK": ("correcto", "correctos"),
+_LEVEL_NAMES = {
+    "CRITICAL": ("critical", "critical"), "ERROR": ("error", "errors"), "HIGH": ("high", "high"),
+    "MEDIUM": ("medium", "medium"), "LOW": ("low", "low"),
+    "INFO": ("informational", "informational"), "OK": ("passed", "passed"),
 }
 
 
 def describe_counts(counts: Dict[str, int]) -> str:
-    """Convierte {'ALTO': 2, 'MEDIO': 1} en '2 altos, 1 medio'."""
+    """Turn {'HIGH': 2, 'ERROR': 1} into '2 high, 1 error'."""
     parts = []
     for lvl, n in counts.items():
-        singular, plural = _LEVEL_PLURALS.get(lvl, (lvl.lower(), lvl.lower()))
+        singular, plural = _LEVEL_NAMES.get(lvl, (lvl.lower(), lvl.lower()))
         parts.append(f"{n} {singular if n == 1 else plural}")
     return ", ".join(parts)
 
@@ -58,7 +58,7 @@ def _supports_color(stream: Any) -> bool:
 
 
 class Console:
-    """Escribe mensajes legibles en stdout y errores en stderr."""
+    """Writes human-readable output to stdout and errors to stderr."""
 
     def __init__(self, color: Optional[bool] = None, stream: Any = None, err: Any = None) -> None:
         self._stream = stream
@@ -90,7 +90,7 @@ class Console:
         codes = ";".join(_CODES[s] for s in styles if s in _CODES)
         return f"\033[{codes}m{text}\033[0m" if codes else text
 
-    # --- Líneas básicas -------------------------------------------------
+    # --- Basic lines ---------------------------------------------------
 
     def out(self, text: str = "") -> None:
         print(text, file=self.stream)
@@ -107,13 +107,13 @@ class Console:
         self.out(f"{self.style('[OK]', 'green', 'bold')} {text}")
 
     def warn(self, text: str) -> None:
-        self.out(f"{self.style('[AVISO]', 'yellow', 'bold')} {text}")
+        self.out(f"{self.style('[WARN]', 'yellow', 'bold')} {text}")
 
     def fail(self, text: str) -> None:
-        self.out(f"{self.style('[FALLO]', 'red', 'bold')} {text}")
+        self.out(f"{self.style('[FAIL]', 'red', 'bold')} {text}")
 
     def error(self, text: str, hint: Optional[str] = None) -> None:
-        """Error de uso o de entorno: va a stderr para no ensuciar la salida útil."""
+        """A usage or environment error. It goes to stderr so it never pollutes useful output."""
         label = "Error:"
         if self._err is None and _supports_color(self.err) and self._color is not False:
             label = "\033[31;1mError:\033[0m"
@@ -130,32 +130,33 @@ class Console:
                                subsequent_indent=" " * len(prefix)))
 
     def kv(self, pairs: Sequence[Sequence[Any]], indent: int = 2) -> None:
-        """Lista alineada de clave y valor."""
+        """Aligned key/value list."""
         if not pairs:
             return
         key_w = max(len(str(k)) for k, _ in pairs)
         for key, value in pairs:
             self.out(f"{' ' * indent}{str(key).ljust(key_w)}  {value}")
 
-    # --- Etiquetas ------------------------------------------------------
+    # --- Tags ----------------------------------------------------------
 
     def level_tag(self, level: Any, pad: int = 0) -> str:
         lvl = normalize_level(level)
         tag = f"[{lvl}]"
         return self.style(tag.ljust(pad), *_LEVEL_STYLES.get(lvl, ()))
 
-    def status_tag(self, ok: Optional[bool], pad: int = 0, labels: Sequence[str] = ("OK", "FALLO")) -> str:
+    def status_tag(self, ok: Optional[bool], pad: int = 0, labels: Sequence[str] = ("OK", "FAILED")) -> str:
         if ok is None:
             return self.style("--".ljust(pad), "dim")
         return self.style(labels[0].ljust(pad), "green") if ok else self.style(labels[1].ljust(pad), "red", "bold")
 
-    # --- Tablas y hallazgos ---------------------------------------------
+    # --- Tables and findings -------------------------------------------
 
     def table(self, headers: Sequence[str], rows: Sequence[Sequence[Any]], indent: int = 2,
               right: Sequence[int] = ()) -> None:
         """
-        Tabla de texto. La última columna se parte en varias líneas si no cabe.
-        Las celdas pueden ser tuplas (texto, estilo...) para colorear sin romper el ancho.
+        Plain-text table. The last column wraps over several lines when it does not fit.
+        A cell may be a tuple (text, style, ...) so it can be coloured without the escape codes
+        counting towards the column width.
         """
         def plain(cell: Any) -> str:
             return str(cell[0]) if isinstance(cell, tuple) else str(cell)
@@ -191,7 +192,7 @@ class Console:
                 self.out(" " * used + paint(row[-1], extra))
 
     def findings(self, findings: Sequence[FindingLike], limit: int = 20) -> None:
-        """Lista hallazgos ordenados por severidad. limit=0 los muestra todos."""
+        """List findings ordered by severity. limit=0 shows all of them."""
         items = [as_finding(f) for f in findings]
         ordered = sorted(items, key=lambda f: (severity_rank(f.level), f.file, f.line))
         shown = ordered if limit <= 0 else ordered[:limit]
@@ -210,7 +211,7 @@ class Console:
                 self.out(head + text[len(body_indent):])
         hidden = len(ordered) - len(shown)
         if hidden > 0:
-            self.hint(f"  ... y {hidden} más. Usa --limit 0 para verlos todos.")
+            self.hint(f"  ... and {hidden} more. Use --limit 0 to show them all.")
 
 
 ui = Console()

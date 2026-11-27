@@ -1,5 +1,5 @@
 """
-Reportes unificados del ecosistema AGENTES (JSON / HTML / SARIF).
+Report writers shared by every agent: JSON, HTML summary and SARIF 2.1.0.
 """
 from __future__ import annotations
 
@@ -13,107 +13,112 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import __version__
 
 SEVERITY_SARIF = {
-    "CRITICO": "error",
-    "ALTO": "error",
-    "MEDIO": "warning",
-    "BAJO": "note",
+    "CRITICAL": "error",
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "note",
     "ERROR": "error",
     "OK": "none",
 }
 
+# The pipeline reports static-analysis and secret findings under coarse rule_ids (SAST-HIGH,
+# SECRET). SARIF consumers group alerts by ruleId, so each finding is given a specific rule
+# derived from its message. The patterns match the messages written by
+# quality.static_checker, defensive.config_manager and Bandit; the first match wins.
 _SAST_SARIF_RULES: Tuple[Tuple[str, re.Pattern[str], str], ...] = (
-    ("SAST-EVAL", re.compile(r"\beval\(\)|\bexec\(\)|riesgo din[aá]mico|possibly insecure function", re.I),
-     "Uso de ejecución dinámica peligrosa (eval/exec)."),
+    ("SAST-EVAL", re.compile(r"\beval\(\)|\bexec\(\)|dynamic code execution|possibly insecure function", re.I),
+     "Dangerous dynamic code execution (eval/exec)."),
     ("SAST-PICKLE", re.compile(r"pickle", re.I),
-     "Deserialización insegura con pickle."),
-    ("SAST-SHELL", re.compile(r"shell=True|Command Injection|start a process with a shell|subprocess call", re.I),
-     "Ejecución de comandos con riesgo de inyección de shell."),
+     "Unsafe deserialisation with pickle."),
+    ("SAST-SHELL", re.compile(r"shell=True|command injection|start a process with a shell|subprocess call", re.I),
+     "Command execution at risk of shell injection."),
     ("SAST-SQLI", re.compile(r"SQL injection|sql_injection", re.I),
-     "Construcción dinámica de consultas SQL (SQL Injection)."),
+     "SQL query built dynamically (SQL injection)."),
     ("SAST-YAML", re.compile(r"yaml\.load", re.I),
-     "Carga de YAML sin SafeLoader."),
-    ("SAST-WEAK-HASH", re.compile(r"\b(?:md5|sha1)\b|hash criptogr[aá]fico d[eé]bil", re.I),
-     "Uso de función hash criptográfica débil (MD5/SHA-1)."),
-    ("SAST-BARE-EXCEPT", re.compile(r"except:'\s*(?:gen[eé]rico|desnuda)", re.I),
-     "Cláusula except genérica sin tipo especificado."),
-    ("SAST-BROAD-EXCEPT", re.compile(r"Uso de 'except Exception:'", re.I),
-     "Captura amplia de Exception sin acotar el tipo."),
-    ("SAST-EXCEPT-PASS", re.compile(r"Try, Except, (?:Pass|Continue)|silencia", re.I),
-     "Excepción capturada y silenciada sin manejo."),
+     "YAML loaded without SafeLoader."),
+    ("SAST-WEAK-HASH", re.compile(r"\b(?:md5|sha1)\b|weak cryptographic hash", re.I),
+     "Weak cryptographic hash function (MD5/SHA-1)."),
+    ("SAST-BARE-EXCEPT", re.compile(r"bare 'except:'", re.I),
+     "Bare except clause with no exception type."),
+    ("SAST-BROAD-EXCEPT", re.compile(r"Use of 'except Exception:'", re.I),
+     "Broad catch of Exception without narrowing the type."),
+    ("SAST-EXCEPT-PASS", re.compile(r"Try, Except, (?:Pass|Continue)|silences", re.I),
+     "Exception caught and silently discarded."),
     ("SAST-TOCTOU", re.compile(r"\bTOCTOU\b", re.I),
-     "Posible condición de carrera entre comprobación y apertura (TOCTOU)."),
-    ("SAST-HARDCODED-SECRET", re.compile(r"secreto hardcodeado|hardcoded password", re.I),
-     "Posible credencial o secreto incrustado en código."),
-    ("SAST-BLOCKING-ASYNC", re.compile(r"bloqueante dentro de funci[oó]n 'async def'", re.I),
-     "Llamada síncrona bloqueante dentro de una corrutina async."),
-    ("SAST-URLOPEN-TIMEOUT", re.compile(r"urlopen\(\)' sin 'timeout'", re.I),
-     "Llamada a urlopen() sin timeout explícito."),
-    ("SAST-UNMANAGED-OPEN", re.compile(r"open\(\)' fuera de un context manager", re.I),
-     "Apertura de archivo con open() fuera de un context manager."),
-    ("SAST-MUTABLE-DEFAULT", re.compile(r"argumento por defecto mutable", re.I),
-     "Uso de argumento por defecto mutable en función."),
-    ("SAST-TLS-VERIFY", re.compile(r"verify=False|Verificaci[oó]n TLS desactivada", re.I),
-     "Verificación de certificados TLS desactivada."),
+     "Possible race between an existence check and opening the file (TOCTOU)."),
+    ("SAST-HARDCODED-SECRET", re.compile(r"hardcoded secret|hardcoded password", re.I),
+     "Possible credential or secret embedded in code."),
+    ("SAST-BLOCKING-ASYNC", re.compile(r"Blocking synchronous call inside an 'async def' function", re.I),
+     "Blocking synchronous call inside an async coroutine."),
+    ("SAST-URLOPEN-TIMEOUT", re.compile(r"urlopen\(\)' without an explicit 'timeout'", re.I),
+     "Call to urlopen() without an explicit timeout."),
+    ("SAST-UNMANAGED-OPEN", re.compile(r"open\(\)' outside a 'with' context manager", re.I),
+     "File opened with open() outside a context manager."),
+    ("SAST-MUTABLE-DEFAULT", re.compile(r"mutable default argument", re.I),
+     "Function with a mutable default argument."),
+    ("SAST-TLS-VERIFY", re.compile(r"verify=False|TLS verification disabled", re.I),
+     "TLS certificate verification disabled."),
     ("SAST-ASSERT", re.compile(r"\bassert\b", re.I),
-     "Uso de assert en código de producción."),
-    ("SAST-DOCSTRING", re.compile(r"carece de docstring", re.I),
-     "Función o método público sin docstring explicativo."),
+     "Use of assert in production code."),
+    ("SAST-DOCSTRING", re.compile(r"has no docstring", re.I),
+     "Public function or method without a docstring."),
 )
 
 _SECRET_SARIF_RULES: Tuple[Tuple[str, re.Pattern[str], str], ...] = (
-    ("SECRET-AWS", re.compile(r"de AWS\b|\bAKIA\b|\bASIA\b", re.I),
-     "Clave o credencial de AWS expuesta."),
-    ("SECRET-GITHUB", re.compile(r"Token de GitHub", re.I),
-     "Token de acceso de GitHub expuesto."),
-    ("SECRET-SLACK", re.compile(r"de Slack\b", re.I),
-     "Token o webhook de Slack expuesto."),
-    ("SECRET-STRIPE", re.compile(r"de Stripe\b", re.I),
-     "Clave de API de Stripe expuesta."),
-    ("SECRET-GOOGLE", re.compile(r"de Google\b", re.I),
-     "Clave de API de Google expuesta."),
-    ("SECRET-ANTHROPIC", re.compile(r"de Anthropic\b", re.I),
-     "Clave de API de Anthropic expuesta."),
-    ("SECRET-OPENAI", re.compile(r"de OpenAI\b", re.I),
-     "Clave de API de OpenAI expuesta."),
-    ("SECRET-SENDGRID", re.compile(r"de SendGrid\b", re.I),
-     "Clave de API de SendGrid expuesta."),
-    ("SECRET-NPM", re.compile(r"Token de npm\b", re.I),
-     "Token de acceso de npm expuesto."),
-    ("SECRET-PYPI", re.compile(r"Token de PyPI\b", re.I),
-     "Token de acceso de PyPI expuesto."),
-    ("SECRET-GITLAB", re.compile(r"Token de GitLab\b", re.I),
-     "Token de acceso de GitLab expuesto."),
-    ("SECRET-PRIVATE-KEY", re.compile(r"Clave privada incrustada", re.I),
-     "Clave privada PEM/SSH incrustada."),
+    ("SECRET-AWS", re.compile(r"\bAWS (?:temporary )?(?:access|secret) key|\bAKIA\b|\bASIA\b", re.I),
+     "Exposed AWS key or credential."),
+    ("SECRET-GITHUB", re.compile(r"GitHub token", re.I),
+     "Exposed GitHub access token."),
+    ("SECRET-SLACK", re.compile(r"Slack (?:token|webhook)", re.I),
+     "Exposed Slack token or webhook."),
+    ("SECRET-STRIPE", re.compile(r"Stripe API key", re.I),
+     "Exposed Stripe API key."),
+    ("SECRET-GOOGLE", re.compile(r"Google API key", re.I),
+     "Exposed Google API key."),
+    ("SECRET-ANTHROPIC", re.compile(r"Anthropic API key", re.I),
+     "Exposed Anthropic API key."),
+    ("SECRET-OPENAI", re.compile(r"OpenAI API key", re.I),
+     "Exposed OpenAI API key."),
+    ("SECRET-SENDGRID", re.compile(r"SendGrid API key", re.I),
+     "Exposed SendGrid API key."),
+    ("SECRET-NPM", re.compile(r"\bnpm token", re.I),
+     "Exposed npm access token."),
+    ("SECRET-PYPI", re.compile(r"PyPI token", re.I),
+     "Exposed PyPI access token."),
+    ("SECRET-GITLAB", re.compile(r"GitLab token", re.I),
+     "Exposed GitLab access token."),
+    ("SECRET-PRIVATE-KEY", re.compile(r"Embedded private key", re.I),
+     "Embedded PEM/SSH private key."),
     ("SECRET-JWT", re.compile(r"JSON Web Token|\bJWT\b", re.I),
-     "JSON Web Token (JWT) incrustado."),
-    ("SECRET-URL-CREDENTIALS", re.compile(r"Credencial dentro de una URL", re.I),
-     "Credenciales embebidas en una URL de conexión."),
-    ("SECRET-AUTH-HEADER", re.compile(r"cabecera Authorization", re.I),
-     "Credencial codificada en cabecera Authorization."),
+     "Embedded JSON Web Token (JWT)."),
+    ("SECRET-URL-CREDENTIALS", re.compile(r"Credential inside a connection URL", re.I),
+     "Credentials embedded in a connection URL."),
+    ("SECRET-AUTH-HEADER", re.compile(r"Authorization header", re.I),
+     "Credential hardcoded in an Authorization header."),
 )
 
 _SARIF_RULE_DESCRIPTIONS: Dict[str, str] = dict((
     *((rule_id, desc) for rule_id, _, desc in _SAST_SARIF_RULES),
     *((rule_id, desc) for rule_id, _, desc in _SECRET_SARIF_RULES),
-    ("SECRET-GENERIC", "Posible secreto incrustado detectado por nombre de clave."),
-    ("DOCKERFILE", "Problema de seguridad o buenas prácticas en Dockerfile."),
-    ("SYSTEMD", "Directiva de endurecimiento faltante o débil en unidad systemd."),
-    ("K8S-POD", "Falta endurecimiento SecurityContext en Pod de Kubernetes."),
-    ("K8S-WORKLOAD", "Falta endurecimiento SecurityContext en workload de Kubernetes."),
-    ("DEPS-PIP", "Dependencia Python sin fijar o con especificación insegura."),
-    ("DEPS-NPM", "Dependencia npm sin versión exacta o con configuración de riesgo."),
-    ("ENV", "Configuración sensible o de depuración insegura en archivo .env."),
-    ("LOG", "Anomalía, error crítico o dato sensible detectado en logs."),
-    ("PERF", "Patrón de rendimiento subóptimo (Big-O, memoria o I/O)."),
-    ("YAML", "Error de sintaxis o formato en archivo YAML."),
+    ("SECRET-GENERIC", "Possible embedded secret, detected by its key name."),
+    ("DOCKERFILE", "Security or best-practice issue in a Dockerfile."),
+    ("SYSTEMD", "Missing or weak hardening directive in a systemd unit."),
+    ("K8S-POD", "Missing securityContext hardening in a Kubernetes Pod."),
+    ("K8S-WORKLOAD", "Missing securityContext hardening in a Kubernetes workload."),
+    ("DEPS-PIP", "Python dependency that is unpinned or loosely specified."),
+    ("DEPS-NPM", "npm dependency without an exact version or with a risky setting."),
+    ("ENV", "Sensitive value or insecure debug setting in a .env file."),
+    ("LOG", "Anomaly, critical error or sensitive data found in a log."),
+    ("PERF", "Suboptimal performance pattern (Big-O, memory or I/O)."),
+    ("YAML", "Syntax or format error in a YAML file."),
 ))
 
 
 def _sarif_rule_id(item: Dict[str, Any]) -> str:
     """
-    ruleId del SARIF. Los hallazgos SAST y SECRET, que llevan un rule_id amplio, reciben uno
-    concreto deducido del mensaje (SAST-SHELL, SECRET-AWS); el resto conserva su rule_id.
+    SARIF ruleId of a finding. SAST and SECRET findings, which carry a coarse rule_id, get a
+    specific one derived from the message (SAST-SHELL, SECRET-AWS); every other finding keeps
+    its own rule_id.
     """
     raw_rule = str(item.get("rule_id") or "")
     msg = str(item.get("message") or "")
@@ -126,18 +131,18 @@ def _sarif_rule_id(item: Dict[str, Any]) -> str:
         for rule_id, pat, _ in _SAST_SARIF_RULES:
             if pat.search(msg):
                 return rule_id
-    return raw_rule or f"RULE-{item.get('level', 'MEDIO')}"
+    return raw_rule or f"RULE-{item.get('level', 'MEDIUM')}"
 
 
-# GitHub Code Scanning clasifica como alerta de seguridad la regla con la etiqueta "security" y
-# toma su gravedad de security-severity: 9,0 o más es crítica, desde 7,0 alta, desde 4,0 media.
-_SECURITY_SEVERITY = {"CRITICO": "9.5", "ERROR": "8.0", "ALTO": "8.0", "MEDIO": "5.5", "BAJO": "2.0"}
+# GitHub Code Scanning treats a rule tagged "security" as a security alert and reads its
+# severity from security-severity: 9.0 or above is critical, from 7.0 high, from 4.0 medium.
+_SECURITY_SEVERITY = {"CRITICAL": "9.5", "ERROR": "8.0", "HIGH": "8.0", "MEDIUM": "5.5", "LOW": "2.0"}
 
 
 def _sarif_rule_meta(rule_id: str, level: str, item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from .rules import SECURITY, category
 
-    desc = _SARIF_RULE_DESCRIPTIONS.get(rule_id, f"Hallazgo reportado por la regla {rule_id}.")
+    desc = _SARIF_RULE_DESCRIPTIONS.get(rule_id, f"Finding reported by rule {rule_id}.")
     meta: Dict[str, Any] = {
         "id": rule_id,
         "name": rule_id,
@@ -147,7 +152,7 @@ def _sarif_rule_meta(rule_id: str, level: str, item: Optional[Dict[str, Any]] = 
     if item is not None:
         if category(item) == SECURITY:
             meta["properties"] = {"tags": ["security"]}
-            severity = _SECURITY_SEVERITY.get(str(item.get("level", "MEDIO")).upper())
+            severity = _SECURITY_SEVERITY.get(str(item.get("level", "MEDIUM")).upper())
             if severity:
                 meta["properties"]["security-severity"] = severity
         else:
@@ -169,7 +174,7 @@ def write_json_report(data: Dict[str, Any], output_path: str) -> str:
 
 
 def _format_finding_uri(raw_file: Any, base_dir: Optional[str] = None) -> str:
-    """Devuelve una ruta relativa legible (separadores '/') cuando es posible."""
+    """A readable path, relative to base_dir and with '/' separators whenever possible."""
     raw = str(raw_file or "unknown")
     if base_dir is not None and os.path.isabs(raw):
         rel = os.path.relpath(raw, os.path.abspath(base_dir))
@@ -189,12 +194,15 @@ def findings_to_sarif(
     base_dir: Optional[str] = None,
 ) -> str:
     """
-    findings: [{file, line, level, message, rule_id?}, ...]
+    Write findings as a SARIF 2.1.0 log and return output_path.
+
+    findings: [{file, line, level, message, rule_id?}, ...]. Absolute paths are made relative
+    to base_dir so the log stays portable between machines.
     """
     results = []
     rules_by_id: Dict[str, Dict[str, Any]] = {}
     for item in findings:
-        level = SEVERITY_SARIF.get(str(item.get("level", "MEDIO")).upper(), "warning")
+        level = SEVERITY_SARIF.get(str(item.get("level", "MEDIUM")).upper(), "warning")
         uri = _format_finding_uri(item.get("file", "unknown"), base_dir=base_dir)
         rule_id = _sarif_rule_id(item)
         if rule_id not in rules_by_id:
@@ -234,7 +242,7 @@ def findings_to_sarif(
 
 
 def _esc(value: Any) -> str:
-    """Escapa un valor para insertarlo en HTML (los hallazgos vienen de código ajeno)."""
+    """Escape a value for HTML. Findings quote third-party code, so nothing is trusted."""
     return html.escape(str(value), quote=True)
 
 
@@ -265,7 +273,7 @@ def write_html_summary(report: Dict[str, Any], output_path: str) -> str:
         f_rows = []
         for item in findings:
             lvl = str(item.get("level", "")).upper()
-            lvl_color = "#dc2626" if lvl in ("CRITICO", "ALTO", "ERROR") else ("#ca8a04" if lvl == "MEDIO" else "#94a3b8")
+            lvl_color = "#dc2626" if lvl in ("CRITICAL", "HIGH", "ERROR") else ("#ca8a04" if lvl == "MEDIUM" else "#94a3b8")
             file_disp = _format_finding_uri(item.get("file", "unknown"), base_dir=base_dir)
             f_rows.append(
                 f"<tr><td>{_esc(file_disp)}</td>"
@@ -276,13 +284,14 @@ def write_html_summary(report: Dict[str, Any], output_path: str) -> str:
                 f"<td>{_esc(item.get('message', ''))}</td></tr>"
             )
         findings_section = (
-            f"<h2>Hallazgos ({len(findings)})</h2>"
-            "<table><thead><tr><th>Archivo</th><th>Línea</th><th>Nivel</th><th>Tipo</th><th>Regla</th><th>Mensaje</th></tr></thead>"
+            f"<h2>Findings ({len(findings)})</h2>"
+            "<table><thead><tr><th>File</th><th>Line</th><th>Level</th><th>Category</th><th>Rule</th>"
+            "<th>Message</th></tr></thead>"
             f"<tbody>{''.join(f_rows)}</tbody></table>"
         )
 
     document = f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8"/>
+<html lang="en"><head><meta charset="utf-8"/>
 <title>AGENTES Pipeline Report</title>
 <style>
 body{{font-family:ui-sans-serif,system-ui,sans-serif;margin:2rem;background:#0f172a;color:#e2e8f0}}
@@ -291,7 +300,7 @@ table{{border-collapse:collapse;width:100%;margin-top:1rem}}
 th,td{{border:1px solid #334155;padding:.6rem;text-align:left}} th{{background:#1e293b}}
 .meta{{color:#94a3b8;font-size:.9rem}}
 </style></head><body>
-<h1>Pipeline AGENTES</h1>
+<h1>AGENTES pipeline</h1>
 <p class="meta">Target: {_esc(report.get('target',''))} · {_esc(report.get('timestamp',''))} · status={_esc(report.get('status'))}</p>
 <table><thead><tr><th>Stage</th><th>Status</th><th>Summary</th><th>Findings</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>

@@ -1,4 +1,4 @@
-"""Los tests generados y --record nunca deben escribir, borrar, mover ni lanzar procesos de verdad."""
+"""Generated tests and --record must never really write, delete, move files or start processes."""
 import ast
 import os
 import subprocess
@@ -15,26 +15,26 @@ from agentes.qa.side_effects import ImportMap, classify, is_io  # noqa: E402
 from agentes.qa.test_generator import QATestGenerator, UnitTestGenerator  # noqa: E402
 
 
-def _clasifica(codigo, modulo="mod"):
-    tree = ast.parse(codigo)
-    imports = ImportMap.from_tree(tree, modulo)
+def _classify(code, module="mod"):
+    tree = ast.parse(code)
+    imports = ImportMap.from_tree(tree, module)
     call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
     return classify(call, imports)
 
 
-def _variables_sin_usar(codigo):
-    """(test, variable) que el test asigna y nunca lee: lo que ruff marca como F841."""
-    sin_usar = []
-    for fn in ast.walk(ast.parse(codigo)):
+def _unused_variables(code):
+    """(test, variable) pairs a test assigns and never reads: what ruff reports as F841."""
+    unused = []
+    for fn in ast.walk(ast.parse(code)):
         if isinstance(fn, ast.FunctionDef) and fn.name.startswith("test_"):
-            nombres = [n for n in ast.walk(fn) if isinstance(n, ast.Name)]
-            leidas = {n.id for n in nombres if isinstance(n.ctx, ast.Load)}
-            asignadas = {n.id for n in nombres if isinstance(n.ctx, ast.Store)} - {"_"}
-            sin_usar.extend((fn.name, nombre) for nombre in sorted(asignadas - leidas))
-    return sin_usar
+            names = [n for n in ast.walk(fn) if isinstance(n, ast.Name)]
+            read = {n.id for n in names if isinstance(n.ctx, ast.Load)}
+            assigned = {n.id for n in names if isinstance(n.ctx, ast.Store)} - {"_"}
+            unused.extend((fn.name, name) for name in sorted(assigned - read))
+    return unused
 
 
-@pytest.mark.parametrize("codigo,esperado", [
+@pytest.mark.parametrize("code,expected", [
     ("import shutil\nshutil.rmtree(p)", ("shutil.rmtree", "shutil.rmtree")),
     ("import shutil as sh\nsh.move(a, b)", ("shutil.move", "shutil.move")),
     ("from shutil import rmtree\nrmtree(p)", ("shutil.rmtree", "mod.rmtree")),
@@ -45,105 +45,105 @@ def _variables_sin_usar(codigo):
     ("open(p, 'w')", ("open", "builtins.open")),
     ("from urllib.request import urlopen\nurlopen(u)", ("urllib.request.urlopen", "mod.urlopen")),
 ])
-def test_detecta_efectos_en_cualquier_forma_de_import(codigo, esperado):
-    assert _clasifica(codigo) == esperado
+def test_detects_side_effects_whatever_the_import_style(code, expected):
+    assert _classify(code) == expected
 
 
-@pytest.mark.parametrize("codigo", [
-    "import os\nos.path.exists(p)", "import os\nos.listdir(p)", "texto.replace('a', 'b')", "len(x)",
+@pytest.mark.parametrize("code", [
+    "import os\nos.path.exists(p)", "import os\nos.listdir(p)", "text.replace('a', 'b')", "len(x)",
 ])
-def test_no_marca_lecturas_ni_metodos_inofensivos(codigo):
-    assert _clasifica(codigo) is None
+def test_does_not_flag_reads_or_harmless_methods(code):
+    assert _classify(code) is None
 
 
-FUENTE = '''
+SOURCE = '''
 import os
 import shutil as sh
-import ayuda
+import helpers
 
-TESTIGO = {testigo!r}
+CANARY = {canary!r}
 
 def delete_items():
-    sh.rmtree(TESTIGO + ".dir", ignore_errors=False)
-    os.remove(TESTIGO)
+    sh.rmtree(CANARY + ".dir", ignore_errors=False)
+    os.remove(CANARY)
 
-def _borrar():
-    os.remove(TESTIGO)
+def _delete():
+    os.remove(CANARY)
 
-def limpiar():
-    _borrar()
+def clean_up():
+    _delete()
     return True
 
-class Gestor:
-    def _quitar(self):
-        os.remove(TESTIGO)
+class Manager:
+    def _remove(self):
+        os.remove(CANARY)
 
-    def vaciar(self):
-        self._quitar()
+    def empty(self):
+        self._remove()
 
-def borrar_indirecto():
+def delete_indirectly():
     try:
-        ayuda.borrar_lejos(TESTIGO)
+        helpers.delete_elsewhere(CANARY)
     except OSError:
         pass
-    return "hecho"
+    return "done"
 '''
 
 
 @pytest.fixture
-def modulo_peligroso(tmp_path):
-    testigo = tmp_path / "testigo.txt"
-    testigo.write_text("no me borres", encoding="utf-8")
+def dangerous_module(tmp_path):
+    canary = tmp_path / "canary.txt"
+    canary.write_text("do not delete me", encoding="utf-8")
     pkg = tmp_path / "pkg"
     pkg.mkdir()
-    (pkg / "ayuda.py").write_text("import os\n\ndef borrar_lejos(p):\n    os.remove(p)\n", encoding="utf-8")
-    (pkg / "limpieza.py").write_text(FUENTE.format(testigo=str(testigo)), encoding="utf-8")
-    return pkg, testigo
+    (pkg / "helpers.py").write_text("import os\n\ndef delete_elsewhere(p):\n    os.remove(p)\n", encoding="utf-8")
+    (pkg / "cleanup.py").write_text(SOURCE.format(canary=str(canary)), encoding="utf-8")
+    return pkg, canary
 
 
-def test_la_es_se_propaga_desde_helpers_y_metodos(modulo_peligroso):
-    pkg, _ = modulo_peligroso
-    visitor = UnitTestGenerator(str(pkg / "limpieza.py"))
-    visitor.visit(ast.parse((pkg / "limpieza.py").read_text(encoding="utf-8")))
+def test_io_propagates_from_helpers_and_methods(dangerous_module):
+    pkg, _ = dangerous_module
+    visitor = UnitTestGenerator(str(pkg / "cleanup.py"))
+    visitor.visit(ast.parse((pkg / "cleanup.py").read_text(encoding="utf-8")))
     assert visitor.function_meta["delete_items"]["io_calls"] == ["os.remove", "shutil.rmtree"]
-    assert visitor.function_meta["limpiar"]["io_calls"] == ["os.remove"], "hereda la E/S de _borrar"
-    assert visitor.function_meta["Gestor.vaciar"]["io_calls"] == ["os.remove"], "hereda la de self._quitar"
+    assert visitor.function_meta["clean_up"]["io_calls"] == ["os.remove"], "inherits the I/O of _delete"
+    assert visitor.function_meta["Manager.empty"]["io_calls"] == ["os.remove"], "inherits that of self._remove"
 
 
 @pytest.mark.parametrize("framework", ["unittest", "pytest"])
-def test_record_y_suites_generadas_no_tocan_el_archivo_testigo(modulo_peligroso, framework):
-    pkg, testigo = modulo_peligroso
+def test_record_and_generated_suites_leave_the_canary_file_alone(dangerous_module, framework):
+    pkg, canary = dangerous_module
     build = QATestGenerator.generate_pytest_suite if framework == "pytest" else QATestGenerator.generate_test_suite
-    salida = pkg / f"test_limpieza_{framework}.py"
-    build(str(pkg / "limpieza.py"), str(salida), record=True)
+    output = pkg / f"test_cleanup_{framework}.py"
+    build(str(pkg / "cleanup.py"), str(output), record=True)
 
-    assert testigo.exists(), "--record no puede borrar nada"
-    assert not (pkg / "__pycache__").exists(), "--record no escribe bytecode en el proyecto analizado"
-    cuerpo = salida.read_text(encoding="utf-8")
-    assert 'patch("os.remove"' in cuerpo and 'patch("shutil.rmtree"' in cuerpo
+    assert canary.exists(), "--record must not delete anything"
+    assert not (pkg / "__pycache__").exists(), "--record writes no bytecode into the analysed project"
+    body = output.read_text(encoding="utf-8")
+    assert 'patch("os.remove"' in body and 'patch("shutil.rmtree"' in body
 
-    run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", salida.name],
+    run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", output.name],
                          capture_output=True, text=True, cwd=str(pkg),
                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     assert run.returncode == 0, run.stdout + run.stderr
-    assert testigo.exists(), "ejecutar la suite generada no puede borrar nada"
-    assert testigo.read_text(encoding="utf-8") == "no me borres"
+    assert canary.exists(), "running the generated suite must not delete anything"
+    assert canary.read_text(encoding="utf-8") == "do not delete me"
 
 
-def test_record_bloquea_la_es_indirecta_y_el_test_la_sustituye(modulo_peligroso):
-    pkg, testigo = modulo_peligroso
-    salida = pkg / "test_ind.py"
-    QATestGenerator.generate_test_suite(str(pkg / "limpieza.py"), str(salida), record=True)
-    cuerpo = salida.read_text(encoding="utf-8")
-    inicio = cuerpo.index("def test_borrar_indirecto")
-    bloque = cuerpo[inicio:cuerpo.index("def test_", inicio + 10)]
-    assert 'patch("os.remove"' in bloque, "el borrado en otro módulo se detecta al grabar"
-    assert "assertEqual(result, 'hecho')" not in bloque, "un resultado obtenido con la E/S bloqueada no se afirma"
-    assert testigo.exists()
+def test_record_blocks_indirect_io_and_the_test_patches_it(dangerous_module):
+    pkg, canary = dangerous_module
+    output = pkg / "test_ind.py"
+    QATestGenerator.generate_test_suite(str(pkg / "cleanup.py"), str(output), record=True)
+    body = output.read_text(encoding="utf-8")
+    start = body.index("def test_delete_indirectly")
+    block = body[start:body.index("def test_", start + 10)]
+    assert 'patch("os.remove"' in block, "the deletion in another module is detected while recording"
+    assert "assertEqual(result, 'done')" not in block, "a result obtained with the I/O blocked is not asserted"
+    assert canary.exists()
 
 
-def test_record_avisa_si_el_modulo_escribe_al_importarse(tmp_path):
-    src = tmp_path / "escribe.py"
+def test_record_warns_when_the_module_writes_on_import(tmp_path):
+    src = tmp_path / "writes.py"
     src.write_text(f"open({str(tmp_path / 'log.txt')!r}, 'w').write('x')\n\ndef f():\n    return 1\n", encoding="utf-8")
     from agentes.qa.expected_values import RecordingError
     with pytest.raises(RecordingError, match="builtins.open"):
@@ -151,39 +151,39 @@ def test_record_avisa_si_el_modulo_escribe_al_importarse(tmp_path):
     assert not (tmp_path / "log.txt").exists()
 
 
-# --- Excepciones de subprocess, patch con nombre completo y E/S indirecta ------------------------
+# --- subprocess exceptions, fully qualified patch targets and indirect I/O ----------------------
 
-@pytest.mark.parametrize("codigo", [
+@pytest.mark.parametrize("code", [
     "import subprocess\nsubprocess.TimeoutExpired('cmd', 5)",
     "import subprocess\nsubprocess.CalledProcessError(1, 'cmd')",
-    "import subprocess\nsubprocess.SubprocessError('fallo')",
+    "import subprocess\nsubprocess.SubprocessError('failure')",
     "from subprocess import TimeoutExpired\nTimeoutExpired('cmd', 5)",
     "import subprocess\nsubprocess.CompletedProcess(['ls'], 0)",
     "from subprocess import CompletedProcess\nCompletedProcess(['ls'], 0)",
-    "import sqlite3\nsqlite3.OperationalError('bloqueada')",
-    "import shutil\nshutil.Error('fallo')",
-    "import requests\nrequests.RequestException('red')",
+    "import sqlite3\nsqlite3.OperationalError('locked')",
+    "import shutil\nshutil.Error('failure')",
+    "import requests\nrequests.RequestException('network')",
 ])
-def test_no_marca_excepciones_ni_resultados_de_modulos_de_es(codigo):
-    """Construir una excepción o un CompletedProcess no es E/S y parchearlo rompe los except."""
-    assert _clasifica(codigo) is None
+def test_does_not_flag_exceptions_or_result_objects_of_io_modules(code):
+    """Building an exception or a CompletedProcess is not I/O, and patching it would break the except clauses."""
+    assert _classify(code) is None
 
 
-def test_is_io_distingue_llamadas_de_subprocess_de_sus_excepciones():
+def test_is_io_tells_subprocess_calls_from_its_exceptions():
     assert is_io("subprocess.run") and is_io("subprocess.Popen") and is_io("subprocess.check_output")
     assert not is_io("subprocess.TimeoutExpired")
     assert not is_io("subprocess.CalledProcessError")
     assert not is_io("subprocess.CompletedProcess")
 
 
-def test_suite_no_sustituye_excepciones_ni_resultados_de_subprocess(tmp_path):
-    """subprocess.run se sustituye, pero TimeoutExpired, CalledProcessError y CompletedProcess siguen reales."""
+def test_suite_does_not_patch_subprocess_exceptions_or_results(tmp_path):
+    """subprocess.run is patched, but TimeoutExpired, CalledProcessError and CompletedProcess stay real."""
     src = tmp_path / "proc.py"
     src.write_text(textwrap.dedent('''
         import subprocess
 
 
-        def ejecuta(cmd: str) -> str:
+        def execute(cmd: str) -> str:
             try:
                 res = subprocess.run([cmd], capture_output=True, text=True, timeout=5)
                 if res.returncode == 1:
@@ -193,160 +193,160 @@ def test_suite_no_sustituye_excepciones_ni_resultados_de_subprocess(tmp_path):
                 return "timeout"
 
 
-        def captura_timeout(cmd: str) -> str:
+        def catch_timeout(cmd: str) -> str:
             try:
                 raise subprocess.TimeoutExpired(cmd, 5)
             except subprocess.TimeoutExpired:
-                return "agotado"
+                return "timed out"
 
 
-        def resultado_vacio(cmd: str) -> subprocess.CompletedProcess:
+        def empty_result(cmd: str) -> subprocess.CompletedProcess:
             return subprocess.CompletedProcess([cmd], 0, stdout="", stderr="")
     '''), encoding="utf-8")
 
     visitor = UnitTestGenerator(str(src))
     visitor.visit(ast.parse(src.read_text(encoding="utf-8")))
-    assert visitor.function_meta["ejecuta"]["io_calls"] == ["subprocess.run"]
-    assert visitor.function_meta["ejecuta"]["io_always"] is True
-    assert visitor.function_meta["captura_timeout"]["io_calls"] == []
-    assert visitor.function_meta["resultado_vacio"]["io_calls"] == []
+    assert visitor.function_meta["execute"]["io_calls"] == ["subprocess.run"]
+    assert visitor.function_meta["execute"]["io_always"] is True
+    assert visitor.function_meta["catch_timeout"]["io_calls"] == []
+    assert visitor.function_meta["empty_result"]["io_calls"] == []
 
     unit, py = tmp_path / "test_proc_unit.py", tmp_path / "test_proc_pytest.py"
     QATestGenerator.generate_test_suite(str(src), str(unit))
     QATestGenerator.generate_pytest_suite(str(src), str(py))
-    for cuerpo in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
-        assert 'patch("subprocess.run", autospec=True)' in cuerpo
-        assert 'patch("subprocess.TimeoutExpired"' not in cuerpo
-        assert 'patch("subprocess.CalledProcessError"' not in cuerpo
-        assert 'patch("subprocess.CompletedProcess"' not in cuerpo
+    for body in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
+        assert 'patch("subprocess.run", autospec=True)' in body
+        assert 'patch("subprocess.TimeoutExpired"' not in body
+        assert 'patch("subprocess.CalledProcessError"' not in body
+        assert 'patch("subprocess.CompletedProcess"' not in body
 
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", unit.name, py.name],
                          capture_output=True, text=True, cwd=str(tmp_path))
     assert run.returncode == 0, run.stdout + run.stderr
 
 
-def test_patch_usa_el_nombre_completo_del_modulo_dentro_de_un_paquete(tmp_path):
-    """from shutil import rmtree en pkg/sub/limpieza.py debe parchear pkg.sub.limpieza.rmtree, no limpieza.rmtree."""
-    testigo = tmp_path / "testigo.txt"
-    testigo.write_text("intacto", encoding="utf-8")
-    testigo_dir = tmp_path / "testigo.txt.dir"
-    testigo_dir.mkdir()
+def test_patch_uses_the_full_module_name_inside_a_package(tmp_path):
+    """from shutil import rmtree in pkg/sub/cleanup.py must patch pkg.sub.cleanup.rmtree, not cleanup.rmtree."""
+    canary = tmp_path / "canary.txt"
+    canary.write_text("intact", encoding="utf-8")
+    canary_dir = tmp_path / "canary.txt.dir"
+    canary_dir.mkdir()
 
     sub = tmp_path / "pkg" / "sub"
     sub.mkdir(parents=True)
     (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
     (sub / "__init__.py").write_text("", encoding="utf-8")
-    src = sub / "limpieza.py"
+    src = sub / "cleanup.py"
     src.write_text(textwrap.dedent(f'''
         from os import remove as rm
         from shutil import rmtree
 
-        TESTIGO = {str(testigo)!r}
+        CANARY = {str(canary)!r}
 
 
-        def purga() -> None:
-            rmtree(TESTIGO + ".dir")
-            rm(TESTIGO)
+        def purge() -> None:
+            rmtree(CANARY + ".dir")
+            rm(CANARY)
     '''), encoding="utf-8")
 
     visitor = UnitTestGenerator(str(src))
     visitor.visit(ast.parse(src.read_text(encoding="utf-8")))
-    assert visitor.module == "pkg.sub.limpieza"
-    assert visitor.function_meta["purga"]["io_calls"] == ["pkg.sub.limpieza.rm", "pkg.sub.limpieza.rmtree"]
-    assert visitor.function_meta["purga"]["io_always"] is True
+    assert visitor.module == "pkg.sub.cleanup"
+    assert visitor.function_meta["purge"]["io_calls"] == ["pkg.sub.cleanup.rm", "pkg.sub.cleanup.rmtree"]
+    assert visitor.function_meta["purge"]["io_always"] is True
 
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
-    unit, py = tests_dir / "test_limpieza_unit.py", tests_dir / "test_limpieza_pytest.py"
+    unit, py = tests_dir / "test_cleanup_unit.py", tests_dir / "test_cleanup_pytest.py"
     QATestGenerator.generate_test_suite(str(src), str(unit))
     QATestGenerator.generate_pytest_suite(str(src), str(py))
-    for cuerpo in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
-        assert 'patch("pkg.sub.limpieza.rm", autospec=True)' in cuerpo
-        assert 'patch("pkg.sub.limpieza.rmtree", autospec=True)' in cuerpo
-        assert 'patch("limpieza.' not in cuerpo
+    for body in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
+        assert 'patch("pkg.sub.cleanup.rm", autospec=True)' in body
+        assert 'patch("pkg.sub.cleanup.rmtree", autospec=True)' in body
+        assert 'patch("cleanup.' not in body
 
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", unit.name, py.name],
                          capture_output=True, text=True, cwd=str(tests_dir))
     assert run.returncode == 0, run.stdout + run.stderr
-    assert testigo.read_text(encoding="utf-8") == "intacto" and testigo_dir.is_dir()
+    assert canary.read_text(encoding="utf-8") == "intact" and canary_dir.is_dir()
 
 
-def test_es_indirecta_entre_modulos_del_proyecto_se_sustituye_sin_record(tmp_path):
-    """La E/S de helpers en otros módulos del proyecto se detecta estáticamente y se propaga también io_always."""
-    testigo = tmp_path / "testigo.txt"
-    testigo.write_text("intacto", encoding="utf-8")
-    testigo_dir = tmp_path / "testigo.txt.dir"
-    testigo_dir.mkdir()
+def test_indirect_io_across_project_modules_is_patched_without_record(tmp_path):
+    """I/O performed by helpers in other project modules is detected statically, io_always included."""
+    canary = tmp_path / "canary.txt"
+    canary.write_text("intact", encoding="utf-8")
+    canary_dir = tmp_path / "canary.txt.dir"
+    canary_dir.mkdir()
 
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
-    (pkg / "disco.py").write_text(textwrap.dedent('''
+    (pkg / "disk.py").write_text(textwrap.dedent('''
         import os
         from shutil import rmtree
 
 
-        def _borra_dir(ruta: str) -> None:
-            rmtree(ruta)
+        def _delete_dir(path: str) -> None:
+            rmtree(path)
 
 
-        def limpia_siempre(ruta: str) -> None:
-            _borra_dir(ruta + ".dir")
-            os.remove(ruta)
+        def always_clean(path: str) -> None:
+            _delete_dir(path + ".dir")
+            os.remove(path)
 
 
-        def limpia_si(ruta: str, activo: bool = False) -> bool:
-            if activo:
-                os.remove(ruta)
-            return activo
+        def clean_if(path: str, enabled: bool = False) -> bool:
+            if enabled:
+                os.remove(path)
+            return enabled
     '''), encoding="utf-8")
-    (pkg / "puente.py").write_text(textwrap.dedent('''
-        from .disco import limpia_siempre
+    (pkg / "bridge.py").write_text(textwrap.dedent('''
+        from .disk import always_clean
 
 
-        def delega(ruta: str) -> None:
-            limpia_siempre(ruta)
+        def delegate(path: str) -> None:
+            always_clean(path)
     '''), encoding="utf-8")
     app = pkg / "app.py"
     app.write_text(textwrap.dedent(f'''
-        import pkg.puente as puente
-        from . import disco
-        from .disco import limpia_si, limpia_siempre as borra_ya
+        import pkg.bridge as bridge
+        from . import disk
+        from .disk import clean_if, always_clean as delete_now
 
-        TESTIGO = {str(testigo)!r}
-
-
-        def borra_directo() -> None:
-            borra_ya(TESTIGO)
+        CANARY = {str(canary)!r}
 
 
-        def borra_por_modulo() -> None:
-            disco.limpia_siempre(TESTIGO)
+        def delete_directly() -> None:
+            delete_now(CANARY)
 
 
-        def borra_en_cadena() -> None:
-            puente.delega(TESTIGO)
+        def delete_via_module() -> None:
+            disk.always_clean(CANARY)
 
 
-        def _paso() -> None:
-            disco.limpia_siempre(TESTIGO)
+        def delete_via_chain() -> None:
+            bridge.delegate(CANARY)
 
 
-        def borra_por_helper() -> None:
-            _paso()
+        def _step() -> None:
+            disk.always_clean(CANARY)
 
 
-        def borra_condicional(activo: bool = False) -> bool:
-            return limpia_si(TESTIGO, activo)
+        def delete_via_helper() -> None:
+            _step()
+
+
+        def delete_conditionally(enabled: bool = False) -> bool:
+            return clean_if(CANARY, enabled)
     '''), encoding="utf-8")
 
     visitor = UnitTestGenerator(str(app))
     visitor.visit(ast.parse(app.read_text(encoding="utf-8")))
-    for fn in ("borra_directo", "borra_por_modulo", "borra_en_cadena", "borra_por_helper"):
-        assert visitor.function_meta[fn]["io_calls"] == ["os.remove", "pkg.disco.rmtree"]
+    for fn in ("delete_directly", "delete_via_module", "delete_via_chain", "delete_via_helper"):
+        assert visitor.function_meta[fn]["io_calls"] == ["os.remove", "pkg.disk.rmtree"]
         assert visitor.function_meta[fn]["io_always"] is True
-    assert visitor.function_meta["borra_condicional"]["io_calls"] == ["os.remove"]
-    assert visitor.function_meta["borra_condicional"]["io_always"] is False
+    assert visitor.function_meta["delete_conditionally"]["io_calls"] == ["os.remove"]
+    assert visitor.function_meta["delete_conditionally"]["io_always"] is False
     assert QATestGenerator._recording_calls(visitor) == {}
 
     tests_dir = tmp_path / "tests"
@@ -354,29 +354,29 @@ def test_es_indirecta_entre_modulos_del_proyecto_se_sustituye_sin_record(tmp_pat
     unit, py = tests_dir / "test_app_unit.py", tests_dir / "test_app_pytest.py"
     QATestGenerator.generate_test_suite(str(app), str(unit))
     QATestGenerator.generate_pytest_suite(str(app), str(py))
-    for cuerpo in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
-        assert 'patch("pkg.disco.rmtree", autospec=True)' in cuerpo
-        assert 'patch("os.remove", autospec=True)' in cuerpo
-        inicio_dir = cuerpo.index("def test_borra_directo_happy_path")
-        fin_dir = cuerpo.find("def test_", inicio_dir + 10)
-        bloque_dir = cuerpo[inicio_dir:] if fin_dir == -1 else cuerpo[inicio_dir:fin_dir]
-        assert "io_0.called or io_1.called" in bloque_dir
-        # Al comprobar que delega en los dobles no se mira el valor: no queda un result sin usar.
-        assert "result = " not in bloque_dir
-        assert _variables_sin_usar(cuerpo) == []
-        inicio = cuerpo.index("def test_borra_condicional_happy_path")
-        fin = cuerpo.find("def test_", inicio + 10)
-        bloque = cuerpo[inicio:] if fin == -1 else cuerpo[inicio:fin]
-        assert "io_0.called" not in bloque
+    for body in (unit.read_text(encoding="utf-8"), py.read_text(encoding="utf-8")):
+        assert 'patch("pkg.disk.rmtree", autospec=True)' in body
+        assert 'patch("os.remove", autospec=True)' in body
+        direct_start = body.index("def test_delete_directly_happy_path")
+        direct_end = body.find("def test_", direct_start + 10)
+        direct_block = body[direct_start:] if direct_end == -1 else body[direct_start:direct_end]
+        assert "io_0.called or io_1.called" in direct_block
+        # When the test checks delegation to the doubles the value is not inspected, so no unused result is left.
+        assert "result = " not in direct_block
+        assert _unused_variables(body) == []
+        start = body.index("def test_delete_conditionally_happy_path")
+        end = body.find("def test_", start + 10)
+        block = body[start:] if end == -1 else body[start:end]
+        assert "io_0.called" not in block
 
     run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", unit.name, py.name],
                          capture_output=True, text=True, cwd=str(tests_dir))
     assert run.returncode == 0, run.stdout + run.stderr
-    assert testigo.read_text(encoding="utf-8") == "intacto" and testigo_dir.is_dir()
+    assert canary.read_text(encoding="utf-8") == "intact" and canary_dir.is_dir()
 
 
-def test_es_indirecta_con_imports_circulares_no_entra_en_bucle(tmp_path):
-    """Dos módulos que se importan entre sí terminan sin recursión infinita y conservan su E/S."""
+def test_indirect_io_with_circular_imports_does_not_loop(tmp_path):
+    """Two modules that import each other finish without infinite recursion and keep their I/O."""
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")

@@ -1,13 +1,13 @@
 """
-Línea base: hallazgos aceptados a conciencia que no deben hacer fallar el pipeline.
+Baseline: findings that were reviewed and deliberately accepted, so they do not fail the pipeline.
 
-Sirve para adoptar la herramienta en un proyecto que ya tiene hallazgos (o datos de prueba
-que lo parecen, como un corpus de secretos falsos) y que el CI falle solo con los nuevos.
+It lets a project adopt the tool while it still has findings (or test data that looks like
+findings, such as a corpus of fake secrets), so that CI only fails on new ones.
 
-Cada hallazgo se identifica por una huella de su regla, su archivo (relativo a la raíz
-analizada) y su mensaje sin números de línea, de modo que la línea base sigue valiendo
-aunque el código se desplace. Si un mismo hallazgo aparece más veces de las registradas,
-las apariciones de más se tratan como nuevas.
+Each finding is identified by a fingerprint of its rule, its file (relative to the analysed
+root) and its message with line numbers stripped, so the baseline stays valid when code moves
+around. If the same finding shows up more times than were recorded, the extra occurrences are
+treated as new.
 """
 from __future__ import annotations
 
@@ -34,7 +34,8 @@ def _relative(path: str, root: str) -> str:
 
 
 def _normalize_message(message: str) -> str:
-    text = re.sub(r"L[ií]nea\s+\d+", "Línea N", message)
+    # Messages that embed "Line 12" would change fingerprint whenever code above them moves.
+    text = re.sub(r"Line\s+\d+", "Line N", message)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -45,7 +46,7 @@ def fingerprint(finding: Mapping[str, Any], root: str) -> str:
 
 
 class Baseline:
-    """Conjunto de huellas aceptadas, con cuántas veces se acepta cada una."""
+    """Accepted fingerprints, each with the number of occurrences it covers."""
 
     def __init__(self, counts: Mapping[str, int], root: str, path: str = "") -> None:
         self._remaining = Counter(counts)
@@ -59,16 +60,16 @@ class Baseline:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
         except FileNotFoundError as exc:
-            raise ValueError(f"No existe la línea base {path}") from exc
+            raise ValueError(f"Baseline {path} does not exist") from exc
         except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"No se pudo leer la línea base {path}: {exc}") from exc
+            raise ValueError(f"Could not read baseline {path}: {exc}") from exc
         if not isinstance(data, dict) or data.get("schema") != SCHEMA:
-            raise ValueError(f"{path} no es una línea base de agentes ({SCHEMA}).")
+            raise ValueError(f"{path} is not an agentes baseline ({SCHEMA}).")
         counts = Counter(entry["fingerprint"] for entry in data.get("entries", []) if "fingerprint" in entry)
         return cls(counts, root, path)
 
     def filter(self, findings: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-        """Devuelve los hallazgos nuevos; los aceptados se descuentan y se cuentan en suppressed."""
+        """Return the new findings; accepted ones are consumed and counted in `suppressed`."""
         kept = []
         for item in findings:
             fp = fingerprint(item, self.root)
@@ -80,15 +81,15 @@ class Baseline:
         return kept
 
     def unused(self) -> int:
-        """Entradas de la línea base que ya no aparecen: conviene regenerarla para retirarlas."""
+        """Baseline entries that no longer match anything; regenerating the baseline drops them."""
         return sum(n for n in self._remaining.values() if n > 0)
 
 
 def write_baseline(path: str, findings: Iterable[Mapping[str, Any]], root: str, *, version: str = "") -> Tuple[int, int]:
     """
-    Guarda como aceptados los hallazgos que harían fallar el pipeline (altos, críticos,
-    errores y secretos). Los medios y bajos no hacen fallar, así que no hace falta guardarlos.
-    Devuelve (guardados, omitidos).
+    Record as accepted the findings that would fail the pipeline (high, critical, errors and
+    secrets). Medium and low findings never fail it, so they are not stored.
+    Returns (stored, skipped).
     """
     entries, skipped = [], 0
     for item in findings:
@@ -107,7 +108,7 @@ def write_baseline(path: str, findings: Iterable[Mapping[str, Any]], root: str, 
     data = {
         "schema": SCHEMA,
         "generated_by": f"agentes {version}".strip(),
-        "note": "Hallazgos revisados y aceptados. Regenera con: agentes pipeline . --write-baseline <archivo>",
+        "note": "Reviewed and accepted findings. Regenerate with: agentes pipeline . --write-baseline <file>",
         "entries": entries,
     }
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)

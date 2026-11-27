@@ -1,22 +1,22 @@
 """
-Resultado esperado de los tests generados.
+Expected results for the generated tests.
 
-El generador no adivina qué devuelve una función a partir de su nombre. Hay dos fuentes
-fiables:
+The generator never guesses what a function returns from its name. There are two reliable
+sources:
 
-- Evaluación estática: si el cuerpo es puro (asignaciones, if, return y raise sobre los
-  parámetros y unos pocos builtins sin efectos), se calcula el resultado sin ejecutar el
-  código del usuario.
-- Grabación (opcional): se importa el módulo en un proceso aparte, se llama a cada función
-  con los valores de ejemplo y se guarda lo que devuelve. Son tests de caracterización:
-  fijan el comportamiento actual, sea correcto o no.
+- Static evaluation: when the body is pure (assignments, if, return and raise over the
+  parameters and a few side-effect-free builtins), the result is computed without running the
+  user's code.
+- Recording (optional): the module is imported in a separate process, each function is called
+  with the sample values and whatever it returns is stored. These are characterisation tests:
+  they pin down the current behaviour, correct or not.
 
-Un resultado es una tupla (tipo, dato, mensaje):
-  ("value", repr_del_valor, "")          devuelve ese valor literal
-  ("raises", NombreExcepción, mensaje)   lanza esa excepción; mensaje es None si no se conoce
-  ("type", nombre_de_tipo, "")           devuelve un objeto no literal de ese tipo (solo al grabar)
-  ("blocked", objetivos, "")             intentó escribir, borrar, lanzar un proceso o conectarse
-                                         y se bloqueó (solo al grabar); objetivos son los patch
+An outcome is a (kind, data, message) tuple:
+  ("value", repr_of_value, "")           returns that literal value
+  ("raises", ExceptionName, message)     raises that exception; message is None when unknown
+  ("type", type_name, "")                returns a non-literal object of that type (recording only)
+  ("blocked", targets, "")               tried to write, delete, start a process or connect and was
+                                         blocked (recording only); targets are the patch targets
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ _LITERAL_TYPES = (int, float, str, bool, bytes, list, tuple, dict, set, type(Non
 
 
 class _GiveUp(Exception):
-    """La función no es evaluable de forma estática."""
+    """Raised internally when a function cannot be evaluated statically."""
 
 
 class _Raised(Exception):
@@ -52,7 +52,7 @@ class _Raised(Exception):
 
 
 def is_literal(value: Any) -> bool:
-    """True si repr(value) vuelve a dar el mismo valor y puede escribirse en un test."""
+    """True when repr(value) round-trips to the same value and can therefore be written into a test."""
     if not isinstance(value, _LITERAL_TYPES):
         return False
     if isinstance(value, float) and not math.isfinite(value):
@@ -80,9 +80,9 @@ _CONVERSIONS: Dict[int, Callable[[Any], Any]] = {-1: lambda v: v, 115: str, 114:
 
 def _interpret(node: ast.AST, env: Dict[str, Any]) -> Any:
     """
-    Evalúa una expresión pura recorriendo el árbol. Cualquier nodo fuera del subconjunto
-    admitido (atributos, lambdas, comprensiones, llamadas no permitidas...) abandona con _GiveUp.
-    No usa eval: el código analizado nunca se ejecuta.
+    Evaluate a pure expression by walking its tree. Any node outside the supported subset
+    (attributes, lambdas, comprehensions, disallowed calls...) gives up with _GiveUp.
+    eval is never used: the analysed code is never executed.
     """
     for node_types, handler in _INTERPRETERS:
         if isinstance(node, node_types):
@@ -96,16 +96,16 @@ def _interpret_constant(node: ast.Constant, env: Dict[str, Any]) -> Any:
 
 def _interpret_name(node: ast.Name, env: Dict[str, Any]) -> Any:
     if node.id not in env:
-        raise _GiveUp  # global, import o nombre desconocido
+        raise _GiveUp  # a global, an import or an unknown name
     return env[node.id]
 
 
 def _interpret_binop(node: ast.BinOp, env: Dict[str, Any]) -> Any:
     if type(node.op) not in _BIN_OPS:
-        raise _GiveUp  # @ y operadores futuros
+        raise _GiveUp  # @ and any operator added in future Python versions
     left, right = _interpret(node.left, env), _interpret(node.right, env)
     if isinstance(node.op, (ast.Pow, ast.LShift)) and not (isinstance(right, int) and 0 <= right <= 64):
-        raise _GiveUp  # evita resultados gigantes
+        raise _GiveUp  # avoids building huge results
     return _apply(_BIN_OPS[type(node.op)], left, right)
 
 
@@ -116,7 +116,7 @@ def _interpret_unaryop(node: ast.UnaryOp, env: Dict[str, Any]) -> Any:
 
 
 def _interpret_boolop(node: ast.BoolOp, env: Dict[str, Any]) -> Any:
-    """and/or con cortocircuito: devuelve el primer operando que decide, como Python."""
+    """Short-circuiting and/or: returns the first operand that decides the result, as Python does."""
     result = None
     for value in node.values:
         result = _interpret(value, env)
@@ -128,7 +128,7 @@ def _interpret_boolop(node: ast.BoolOp, env: Dict[str, Any]) -> Any:
 
 
 def _interpret_compare(node: ast.Compare, env: Dict[str, Any]) -> Any:
-    """Comparaciones encadenadas (a < b <= c): se detiene en la primera que no se cumple."""
+    """Chained comparisons (a < b <= c): stops at the first one that does not hold."""
     left = _interpret(node.left, env)
     for op, comparator in zip(node.ops, node.comparators):
         if type(op) not in _CMP_OPS:
@@ -156,7 +156,7 @@ def _interpret_sequence(node: Union[ast.Tuple, ast.List, ast.Set], env: Dict[str
 
 def _interpret_dict(node: ast.Dict, env: Dict[str, Any]) -> Any:
     if any(k is None for k in node.keys):
-        raise _GiveUp  # desempaquetado **
+        raise _GiveUp  # ** unpacking
     return _apply(dict, [(_interpret(cast(ast.expr, k), env), _interpret(v, env)) for k, v in zip(node.keys, node.values)])
 
 
@@ -170,7 +170,7 @@ def _interpret_slice(node: ast.Slice, env: Dict[str, Any]) -> Any:
 
 
 def _interpret_call(node: ast.Call, env: Dict[str, Any]) -> Any:
-    """Solo builtins sin efectos (_SAFE_BUILTINS), sin argumentos con nombre ni desempaquetados."""
+    """Only side-effect-free builtins (_SAFE_BUILTINS), with no keyword arguments and no unpacking."""
     if node.keywords or not (isinstance(node.func, ast.Name) and node.func.id in _SAFE_BUILTINS):
         raise _GiveUp
     if any(isinstance(a, ast.Starred) for a in node.args):
@@ -183,13 +183,13 @@ def _interpret_joinedstr(node: ast.JoinedStr, env: Dict[str, Any]) -> Any:
 
 
 def _interpret_formatted(node: ast.FormattedValue, env: Dict[str, Any]) -> Any:
-    """Un campo de f-string: conversión (!r, !s, !a) y especificación de formato."""
+    """One f-string field: conversion (!r, !s, !a) and format specification."""
     value = _CONVERSIONS.get(node.conversion, str)(_interpret(node.value, env))
     spec = _interpret(node.format_spec, env) if node.format_spec is not None else ""
     return _apply(format, value, spec)
 
 
-# Tipos de nodo que sabe evaluar _interpret y quién los evalúa.
+# Node types _interpret can evaluate, and the function that evaluates each one.
 _INTERPRETERS: Tuple[Tuple[Any, Callable[[Any, Dict[str, Any]], Any]], ...] = (
     (ast.Constant, _interpret_constant),
     (ast.Name, _interpret_name),
@@ -209,10 +209,10 @@ _INTERPRETERS: Tuple[Tuple[Any, Callable[[Any, Dict[str, Any]], Any]], ...] = (
 
 
 def _apply(func: Any, *args: Any) -> Any:
-    """Aplica una operación; si falla, esa excepción es el resultado esperado."""
+    """Apply an operation; if it raises, that exception is the expected outcome."""
     try:
         return func(*args)
-    except Exception as exc:  # noqa: BLE001 - se devuelve como resultado, no se oculta
+    except Exception as exc:  # noqa: BLE001 - returned as the outcome, not hidden
         raise _Raised(exc) from exc
 
 
@@ -243,7 +243,7 @@ def _raise_message(node: Optional[ast.AST]) -> Optional[str]:
 def _run(stmts: List[ast.stmt], env: Dict[str, Any]) -> Optional[Tuple[str, Any, Optional[str]]]:
     for st in stmts:
         if isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant):
-            continue  # docstring o literal suelto
+            continue  # a docstring or a bare literal
         if isinstance(st, ast.Pass):
             continue
         if isinstance(st, ast.Return):
@@ -268,12 +268,12 @@ def _run(stmts: List[ast.stmt], env: Dict[str, Any]) -> Optional[Tuple[str, Any,
             combined = ast.BinOp(left=ast.Name(id=st.target.id, ctx=ast.Load()), op=st.op, right=st.value)
             env[st.target.id] = _eval(combined, env)
             continue
-        raise _GiveUp  # bucles, with, try, llamadas con efectos...
+        raise _GiveUp  # loops, with, try, calls with side effects...
     return None
 
 
 def static_outcome(func: Optional[FuncNode], arg_names: List[str], samples: List[str]) -> Optional[Outcome]:
-    """Resultado de llamar a func con samples, calculado sin ejecutar el código. None si no es posible."""
+    """Outcome of calling func with samples, computed without running the code. None when that is not possible."""
     if func is None or len(arg_names) != len(samples):
         return None
     try:
@@ -286,7 +286,7 @@ def static_outcome(func: Optional[FuncNode], arg_names: List[str], samples: List
         return None
     except _Raised as raised:
         exc = raised.exc
-        # Solo excepciones de builtins: son las únicas que el test puede nombrar con seguridad.
+        # Builtin exceptions only: they are the only ones the test can name without importing anything.
         if type(exc).__module__ != "builtins":
             return None
         return ("raises", type(exc).__name__, str(exc))
@@ -297,7 +297,7 @@ def static_outcome(func: Optional[FuncNode], arg_names: List[str], samples: List
 
 
 def is_pure_binop(func: Optional[FuncNode], arg_names: List[str]) -> bool:
-    """True si el cuerpo es un único `return a <op> b` sobre dos parámetros."""
+    """True when the body is a single `return a <op> b` over two parameters."""
     if func is None or len(arg_names) != 2:
         return False
     body = [st for st in func.body if not (isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant))]
@@ -309,12 +309,12 @@ def is_pure_binop(func: Optional[FuncNode], arg_names: List[str]) -> bool:
 
 
 def _returns_none(node: ast.Return) -> bool:
-    """return a secas o return None."""
+    """A bare return or return None."""
     return node.value is None or (isinstance(node.value, ast.Constant) and node.value.value is None)
 
 
 def _optional_annotation(ann: Optional[ast.AST]) -> bool:
-    """La anotación de retorno admite None: Optional[X], X | None, Union[X, None] o Any."""
+    """True when the return annotation allows None: Optional[X], X | None, Union[X, None] or Any."""
     if ann is None:
         return False
     if any(isinstance(n, ast.Constant) and n.value is None for n in ast.walk(ann)):
@@ -325,11 +325,11 @@ def _optional_annotation(ann: Optional[ast.AST]) -> bool:
 
 def fallback_assertion(func: Optional[FuncNode]) -> Tuple[str, str]:
     """
-    Qué se puede afirmar sin conocer el valor:
-      ("isinstance", T)  la anotación de retorno es un tipo simple
-      ("is_none", "")    la función nunca devuelve un valor
-      ("not_none", "")   termina siempre con un return de valor y ningún camino devuelve None
-      ("none", "")       no hay nada seguro que afirmar (generadores, Optional, algún return None)
+    What can be asserted without knowing the value:
+      ("isinstance", T)  the return annotation is a simple type
+      ("is_none", "")    the function never returns a value
+      ("not_none", "")   it always ends with a return of a value and no path returns None
+      ("none", "")       nothing is safe to assert (generators, Optional, some return None)
     """
     if func is None:
         return ("none", "")
@@ -364,7 +364,7 @@ def fallback_assertion(func: Optional[FuncNode]) -> Tuple[str, str]:
 
 
 def uses_nondeterminism(func: Optional[FuncNode], nondet_calls: Iterable[str]) -> bool:
-    """True si la función llama a reloj, azar, uuid o entorno: su resultado no se puede fijar."""
+    """True when the function reads the clock, randomness, uuid or the environment: its result cannot be pinned."""
     if func is None:
         return False
     names = set(nondet_calls)
@@ -385,20 +385,20 @@ def _chain(node: ast.AST) -> str:
     return ""
 
 
-# --- Grabación --------------------------------------------------------------
+# --- Recording ---------------------------------------------------------------
 
 _RECORDER = r'''
 import ast, asyncio, builtins, importlib, io, json, math, os, pathlib, shutil, socket, subprocess, sys
 
-# No escribir __pycache__ dentro del proyecto analizado.
+# Never write __pycache__ into the analysed project.
 sys.dont_write_bytecode = True
 src_dir, module_name = sys.argv[1], sys.argv[2]
 calls = json.loads(sys.stdin.read())
 sys.path.insert(0, src_dir)
 
-# Bloqueo de efectos: escribir, borrar, mover, lanzar procesos y conectarse a la red.
-# No es un sandbox (código hostil puede saltárselo), es una red de seguridad para código
-# normal que hace E/S a través de otros módulos que el análisis estático no ve.
+# Block side effects: writing, deleting, moving, starting processes and connecting to the
+# network. This is not a sandbox (hostile code can get around it); it is a safety net for
+# ordinary code that does I/O through other modules that static analysis cannot see.
 class BlockedSideEffect(PermissionError):
     pass
 
@@ -407,7 +407,7 @@ triggered = []
 def blocker(target):
     def blocked(*args, **kwargs):
         triggered.append(target)
-        raise BlockedSideEffect(f"bloqueado al grabar: {target}")
+        raise BlockedSideEffect(f"blocked while recording: {target}")
     return blocked
 
 for mod, names in (
@@ -430,7 +430,7 @@ _real_open = builtins.open
 def guarded_open(file, mode="r", *args, **kwargs):
     if any(flag in str(mode) for flag in "wax+"):
         triggered.append("builtins.open")
-        raise BlockedSideEffect(f"bloqueado al grabar: open({file!r}, {mode!r})")
+        raise BlockedSideEffect(f"blocked while recording: open({file!r}, {mode!r})")
     return _real_open(file, mode, *args, **kwargs)
 builtins.open = io.open = guarded_open
 _real_os_open = os.open
@@ -438,7 +438,7 @@ _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 def guarded_os_open(path, flags, *args, **kwargs):
     if flags & _WRITE_FLAGS:
         triggered.append("os.open")
-        raise BlockedSideEffect(f"bloqueado al grabar: os.open({path!r})")
+        raise BlockedSideEffect(f"blocked while recording: os.open({path!r})")
     return _real_os_open(path, flags, *args, **kwargs)
 os.open = guarded_os_open
 
@@ -447,7 +447,7 @@ try:
 except BaseException as exc:
     detail = f"{type(exc).__name__}: {exc}"
     if triggered:
-        detail = f"el módulo intenta {', '.join(sorted(set(triggered)))} al importarse"
+        detail = f"the module attempts {', '.join(sorted(set(triggered)))} when imported"
     print(json.dumps({"__error__": detail}))
     raise SystemExit(0)
 
@@ -461,7 +461,7 @@ def literal(value):
         return None
 
 namespace = dict(vars(module))
-# Los valores de ejemplo de algunos tipos usan estos módulos (pathlib.Path("..."), datetime.date(...)).
+# Sample values for some types use these modules (pathlib.Path("..."), datetime.date(...)).
 for extra in ("pathlib", "datetime", "decimal", "fractions", "re"):
     namespace.setdefault(extra, importlib.import_module(extra))
 out = {}
@@ -480,7 +480,7 @@ for key, expr in calls.items():
         out[key] = ["raises", name, str(exc)]
         continue
     if triggered:
-        # La función capturó el bloqueo y siguió: su resultado no refleja lo que haría de verdad.
+        # The function caught the block and carried on, so its result is not what it would really return.
         out[key] = ["blocked", ",".join(sorted(set(triggered))), ""]
         continue
     text = literal(value)
@@ -490,19 +490,20 @@ print(json.dumps(out))
 
 
 class RecordingError(RuntimeError):
-    """No se pudo importar o ejecutar el módulo para grabar resultados."""
+    """The module could not be imported or run to record results."""
 
 
 def record_outcomes(source_filepath: str, calls: Dict[str, str], *, timeout: float = 20.0) -> Dict[str, Outcome]:
     """
-    Ejecuta cada expresión de calls (clave -> "func(1, 2)") en un proceso aparte y devuelve
-    lo que produce. Importa el módulo, así que ejecuta su código de nivel superior.
+    Evaluate each expression in calls (key -> "func(1, 2)") in a separate, isolated (-I)
+    interpreter and return what it produces. The module is imported, so its top-level code runs.
     """
     if not calls:
         return {}
     from .call_plan import module_import
 
-    # En un paquete se importa con su ruta completa desde la raíz: así funcionan sus imports relativos.
+    # Inside a package the module is imported by its full dotted name from the root, so its
+    # relative imports work.
     module_name, src_dir = module_import(source_filepath)
     with tempfile.TemporaryDirectory(prefix="agentes-record-") as workdir:
         try:
@@ -511,12 +512,12 @@ def record_outcomes(source_filepath: str, calls: Dict[str, str], *, timeout: flo
                 input=json.dumps(calls), capture_output=True, text=True, timeout=timeout, cwd=workdir,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RecordingError(f"La grabación superó {timeout:.0f} s: alguna función no termina.") from exc
+            raise RecordingError(f"Recording took longer than {timeout:.0f} s: some function does not terminate.") from exc
     lines = [ln for ln in proc.stdout.strip().splitlines() if ln.startswith("{")]
     if proc.returncode != 0 or not lines:
-        detail = (proc.stderr.strip().splitlines() or ["sin salida"])[-1]
-        raise RecordingError(f"No se pudo grabar: {detail}")
+        detail = (proc.stderr.strip().splitlines() or ["no output"])[-1]
+        raise RecordingError(f"Could not record: {detail}")
     data = json.loads(lines[-1])
     if "__error__" in data:
-        raise RecordingError(f"No se pudo importar {module_name}: {data['__error__']}")
+        raise RecordingError(f"Could not import {module_name}: {data['__error__']}")
     return {key: (item[0], item[1], item[2] if len(item) > 2 else None) for key, item in data.items()}

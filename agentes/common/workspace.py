@@ -1,4 +1,4 @@
-"""Resolución del directorio donde los demos escriben sus artefactos."""
+"""Where the agent demos write their artefacts."""
 from __future__ import annotations
 
 import os
@@ -6,11 +6,11 @@ import os
 
 def agent_output_dir(agent_file: str) -> str:
     """
-    Devuelve un directorio escribible para los artefactos de un demo.
+    Return a writable directory for a demo's artefacts.
 
-    Orden: AGENTES_WORKDIR/<agente> si está definida; si no, el propio
-    directorio del agente cuando se puede escribir en él (checkout de
-    desarrollo); si no —instalación de solo lectura— ./<agente> bajo el cwd.
+    Resolution order: AGENTES_WORKDIR/<agent> when the variable is set; otherwise the agent's
+    own package directory when it is writable (a development checkout); otherwise, for a
+    read-only installation, ./<agent> under the current working directory.
     """
     pkg_dir = os.path.dirname(os.path.abspath(agent_file))
     name = os.path.basename(pkg_dir)

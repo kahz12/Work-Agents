@@ -1,21 +1,20 @@
-# Agente de Refactorización y Arquitectura
+# Refactoring and Architecture Agent
 
-Métricas de complejidad, heurísticas SOLID, sugerencias de refactor y diagramas Mermaid.
+Complexity metrics, SOLID heuristics, refactoring suggestions and Mermaid diagrams.
 
-## Estructura
+## Layout
 
-- `code_metrics.py` — LOC, complejidad **ciclomática** y **cognitiva** por AST.
-- `solid_checker.py` — Heurísticas SRP / OCP / DIP.
-- `refactor_suggester.py` — Recomendaciones a partir de métricas + hallazgos SOLID.
-- `architecture_diagram.py` — Diagrama de clases **Mermaid.js** (herencia incluida).
-- `main.py` — Demo ejecutable (usa `sample_monolith.py` de ejemplo).
+- `code_metrics.py` — Lines of code plus **cyclomatic** and **cognitive** complexity from the AST, and a performance audit (Big-O pitfalls, memory, blocking I/O).
+- `solid_checker.py` — SRP / OCP / DIP heuristics plus guard clauses, exception hygiene, state safety and dataclass contracts.
+- `refactor_suggester.py` — Recommendations built from the metrics and the SOLID findings.
+- `architecture_diagram.py` — **Mermaid.js** class diagram, inheritance included.
+- `main.py` — Runnable demo (writes and analyses a sample `sample_monolith.py`).
 
-## Uso
+## Usage
 
 ```bash
-agentes demo refactor               # demo con datos de ejemplo
-python -m agentes.refactor.main     # lo mismo, sin pasar por el CLI
+agentes demo refactor               # demo on sample data
+python -m agentes.refactor.main     # the same, without going through the CLI
 agentes metrics ./src
-agentes generate diagram --source modelos.py
+agentes generate diagram --source models.py
 ```
-
